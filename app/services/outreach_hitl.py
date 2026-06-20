@@ -9,6 +9,7 @@ from supabase import Client
 from app.engine.factory import LeadGenEngine
 from app.services.outreach_queue import OutreachQueueStore
 from app.services.stage1 import DefinitionService
+from app.tools.personalize.defaults import merge_client_context
 from app.tools.personalize.models import ClientContext, OutreachDraft
 from app.tools.policy import AgentRole
 
@@ -51,8 +52,31 @@ class OutreachHitlService:
         logger.info("outreach_rejected draft_id=%s", draft_id)
         return _draft_view(draft)
 
+    def update(
+        self,
+        draft_id: str,
+        *,
+        subject: str | None = None,
+        body: str | None = None,
+        hook: str | None = None,
+        email: str | None = None,
+    ) -> dict[str, Any]:
+        draft = self._queue.update(
+            draft_id,
+            subject=subject,
+            body=body,
+            hook=hook,
+            email=email,
+        )
+        logger.info("outreach_updated draft_id=%s", draft_id)
+        return _draft_view(draft)
+
     def send(self, draft_id: str) -> dict[str, Any]:
         draft = self._require(draft_id)
+        if not draft.email or not draft.email.strip():
+            raise ValueError(
+                "No recipient email on this draft. Use Edit to add the prospect's email, then approve again."
+            )
         if draft.status != "approved":
             raise ValueError(
                 f"Draft must be approved before send (status={draft.status}). "
@@ -71,20 +95,12 @@ class OutreachHitlService:
         }
 
     def load_client_context(self, client_id: UUID | None) -> ClientContext:
+        from app.tools.personalize.defaults import default_client_context
+
         if not client_id or not self._definitions:
-            return ClientContext()
+            return default_client_context()
         definition = self._definitions.get_active(client_id)
-        if not definition:
-            return ClientContext()
-        return ClientContext(
-            offer_headline=definition.offer_headline or ClientContext().offer_headline,
-            offer_description=definition.offer_description or ClientContext().offer_description,
-            value_proposition=definition.value_proposition or ClientContext().value_proposition,
-            calendar_url=definition.calendar_url,
-            messaging_dos=definition.messaging_dos or ClientContext().messaging_dos,
-            messaging_donts=definition.messaging_donts or ClientContext().messaging_donts,
-            pain_points=definition.pain_points or ClientContext().pain_points,
-        )
+        return merge_client_context(definition)
 
     def _require(self, draft_id: str) -> OutreachDraft:
         draft = self._queue.get(draft_id)

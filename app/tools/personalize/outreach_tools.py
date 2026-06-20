@@ -8,6 +8,7 @@ from typing import Any
 import httpx
 
 from app.tools.enrichment.providers import _parse_json_content
+from app.tools.personalize.defaults import normalize_outreach_text
 from app.tools.personalize.models import (
     ClientContext,
     OutreachMessage,
@@ -47,13 +48,14 @@ OUTREACH_SYSTEM = """You write cold outbound emails for B2B lead gen. Rules:
 - Under 120 words in body
 - First line MUST reference the specific signal provided — never generic
 - Connect their pain to the offer naturally
-- One clear CTA (book a call)
+- One clear CTA with the exact calendar_url provided — embed the full URL in the email
+- Sign off with the exact sender_name provided (e.g. "Best,\\nDhaivat NJ") — NEVER use [Your Name] or placeholders
 - Sound human, direct, peer-level — not salesy
 - Follow messaging dos and avoid messaging donts
 Return ONLY valid JSON:
 {
   "subject": "string — specific, not clickbait",
-  "body": "string — full email with greeting and sign-off",
+  "body": "string — full email with greeting, CTA with calendar_url, and sign-off with sender_name",
   "hook": "string — the opening line only",
   "signal_used": "string — which signal you referenced",
   "signal_type": "same enum as input"
@@ -154,6 +156,7 @@ class WriteOutreachTool:
                 "messaging_dos": ctx.messaging_dos,
                 "messaging_donts": ctx.messaging_donts,
                 "calendar_url": ctx.calendar_url,
+                "sender_name": ctx.sender_name,
             },
             indent=2,
         )
@@ -168,10 +171,13 @@ class WriteOutreachTool:
         except ValueError:
             st = sig.strongest_signal_type
 
+        body = normalize_outreach_text(data.get("body", ""), ctx)
+        hook = normalize_outreach_text(data.get("hook", ""), ctx)
+
         return OutreachMessage(
             subject=data.get("subject", "Quick question"),
-            body=data.get("body", ""),
-            hook=data.get("hook", ""),
+            body=body,
+            hook=hook,
             signal_used=data.get("signal_used") or sig.strongest_signal or "",
             signal_type=st,
             raw=data,

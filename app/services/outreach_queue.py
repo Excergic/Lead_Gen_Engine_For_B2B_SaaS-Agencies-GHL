@@ -50,7 +50,7 @@ class OutreachQueueStore:
                 .maybe_single()
                 .execute()
             )
-            if row.data:
+            if row and row.data:
                 return _row_to_draft(row.data)
         for draft in self._load_all_jsonl():
             if draft.id == draft_id:
@@ -87,6 +87,37 @@ class OutreachQueueStore:
             )
         draft.status = "sent"
         draft.sent_at = datetime.now(UTC)
+        self._update(draft)
+        return draft
+
+    def update(
+        self,
+        draft_id: str,
+        *,
+        subject: str | None = None,
+        body: str | None = None,
+        hook: str | None = None,
+        email: str | None = None,
+    ) -> OutreachDraft:
+        draft = self._require(draft_id)
+        if draft.status in ("sent", "rejected"):
+            raise ValueError(f"Cannot edit draft with status={draft.status}")
+
+        if subject is not None:
+            draft.subject = subject
+        if body is not None:
+            draft.body = body
+        if hook is not None:
+            draft.hook = hook
+        if email is not None:
+            draft.email = email or None
+
+        # Edited approved drafts need re-review before send
+        if draft.status == "approved":
+            draft.status = "pending_review"
+            draft.reviewed_at = None
+            draft.reviewed_by = None
+
         self._update(draft)
         return draft
 

@@ -377,6 +377,13 @@ class OutreachApproveRequest(BaseModel):
     reviewed_by: str = Field(default="operator", max_length=100)
 
 
+class OutreachUpdateRequest(BaseModel):
+    subject: str | None = Field(default=None, min_length=1, max_length=500)
+    body: str | None = Field(default=None, min_length=1, max_length=10000)
+    hook: str | None = Field(default=None, max_length=2000)
+    email: str | None = Field(default=None, max_length=320)
+
+
 class OutreachDraftResponse(BaseModel):
     id: str
     lead_id: str

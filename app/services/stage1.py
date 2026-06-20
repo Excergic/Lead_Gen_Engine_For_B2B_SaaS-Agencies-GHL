@@ -60,7 +60,7 @@ class ClientService:
 
     def get(self, client_id: UUID) -> ClientResponse:
         row = self._db.table("clients").select("*").eq("id", str(client_id)).maybe_single().execute()
-        if not row.data:
+        if not row or not row.data:
             raise NotFoundError("client", client_id)
         return _row_to_model(ClientResponse, row.data)
 
@@ -91,7 +91,7 @@ class DefinitionService:
             .maybe_single()
             .execute()
         )
-        if not row.data:
+        if not row or not row.data:
             return None
         return _row_to_model(DefinitionResponse, row.data)
 
@@ -186,7 +186,7 @@ class ICPProfileService:
             .maybe_single()
             .execute()
         )
-        if not row.data:
+        if not row or not row.data:
             raise NotFoundError("icp_profile", icp_id)
         return _row_to_model(ICPProfileResponse, row.data)
 
@@ -248,7 +248,7 @@ class CaseStudyService:
             .maybe_single()
             .execute()
         )
-        if not row.data:
+        if not row or not row.data:
             raise NotFoundError("case_study", case_study_id)
         return _row_to_model(CaseStudyResponse, row.data)
 

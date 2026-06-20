@@ -29,6 +29,15 @@ class Settings(BaseSettings):
     outreach_queue_jsonl: str = "data/outreach_queue.jsonl"
     email_dry_run: bool = True
 
+    # Outreach defaults — used when Stage 1 definition has no calendar / sign-off
+    outreach_sender_name: str = "Dhaivat NJ"
+    outreach_calendar_url: str = "https://calendly.com/dhaivat-jambudia/new-meeting"
+    outreach_offer_headline: str = "Qualified meetings on your calendar — fully automated"
+    outreach_offer_description: str = (
+        "We find prospects, personalize outreach, and book meetings while you focus on closing."
+    )
+    outreach_value_proposition: str = "Wake up to calendar invites from qualified prospects."
+
     # SMTP — all optional; required only when email_dry_run=false
     smtp_host: str | None = None
     smtp_port: int = 587

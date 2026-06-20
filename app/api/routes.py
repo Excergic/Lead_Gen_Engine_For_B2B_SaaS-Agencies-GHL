@@ -35,6 +35,7 @@ from app.models.schemas import (
     OutreachDraftResponse,
     OutreachRejectRequest,
     OutreachSendResponse,
+    OutreachUpdateRequest,
     PersonalizeRunRequest,
     PersonalizeRunResponse,
     ICPProfileCreate,
@@ -426,6 +427,24 @@ def get_outreach_draft(
         return OutreachDraftResponse(**hitl.get_draft(draft_id))
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.patch("/outreach/{draft_id}", response_model=OutreachDraftResponse)
+def update_outreach_draft(
+    draft_id: str,
+    payload: OutreachUpdateRequest,
+    hitl: OutreachHitlService = Depends(_hitl_service),
+) -> OutreachDraftResponse:
+    """Edit subject, body, hook, or email. Approved drafts return to pending_review."""
+    try:
+        data = payload.model_dump(exclude_unset=True)
+        if not data:
+            raise HTTPException(status_code=400, detail="No fields to update")
+        return OutreachDraftResponse(**hitl.update(draft_id, **data))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/outreach/{draft_id}/approve", response_model=OutreachDraftResponse)

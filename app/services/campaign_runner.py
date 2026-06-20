@@ -28,6 +28,7 @@ from app.services.stage1 import DefinitionService
 from app.tools.enrichment.models import EnrichedLead
 from app.tools.icp import ICP_PROFILES
 from app.tools.models import ICPId, LeadCandidate
+from app.tools.personalize.defaults import merge_client_context
 from app.tools.personalize.models import ClientContext, OutreachDraft
 
 logger = logging.getLogger(__name__)
@@ -112,6 +113,7 @@ class CampaignRunnerService:
         self._update_metrics(campaign_id, result)
         self._upsert_daily_metrics(campaign_id, result)
         self._finish_run_row(run_id, result)
+        self._pause_campaign_after_run(campaign_id)
 
         msg = (
             f"Discovered {len(result.leads)}, enriched {len(result.enriched)}, "
@@ -123,7 +125,7 @@ class CampaignRunnerService:
         return CampaignRunResponse(
             run_id=run_id,
             campaign_id=campaign_id,
-            campaign_status=CampaignStatus.ACTIVE,
+            campaign_status=CampaignStatus.PAUSED,
             leads_discovered=len(result.leads),
             leads_enriched=len(result.enriched),
             drafts_queued=len(result.drafts),
@@ -163,6 +165,15 @@ class CampaignRunnerService:
             updates["started_at"] = datetime.now(UTC).isoformat()
         self._db.table("campaigns").update(updates).eq("id", str(campaign_id)).execute()
 
+    def _pause_campaign_after_run(self, campaign_id: UUID) -> None:
+        """Return to paused so the operator can re-run locally without manual reset."""
+        try:
+            self._db.table("campaigns").update(
+                {"status": CampaignStatus.PAUSED.value}
+            ).eq("id", str(campaign_id)).execute()
+        except Exception as exc:
+            logger.warning("campaign_pause_after_run_failed err=%s", exc)
+
     # ------------------------------------------------------------------
     # ICP resolution
     # ------------------------------------------------------------------
@@ -195,18 +206,7 @@ class CampaignRunnerService:
 
     def _load_client_context(self, client_id: UUID) -> ClientContext:
         definition = self._definitions.get_active(client_id)
-        if not definition:
-            return ClientContext()
-        defaults = ClientContext()
-        return ClientContext(
-            offer_headline=definition.offer_headline or defaults.offer_headline,
-            offer_description=definition.offer_description or defaults.offer_description,
-            value_proposition=definition.value_proposition or defaults.value_proposition,
-            calendar_url=str(definition.calendar_url) if definition.calendar_url else None,
-            messaging_dos=definition.messaging_dos or defaults.messaging_dos,
-            messaging_donts=definition.messaging_donts or defaults.messaging_donts,
-            pain_points=definition.pain_points or defaults.pain_points,
-        )
+        return merge_client_context(definition)
 
     # ------------------------------------------------------------------
     # Persistence

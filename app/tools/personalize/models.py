@@ -58,12 +58,15 @@ class ClientContext(BaseModel):
         "We find prospects, personalize outreach, and book meetings while you focus on closing."
     )
     value_proposition: str = "Wake up to calendar invites from qualified prospects."
-    calendar_url: str | None = None
+    calendar_url: str | None = "https://calendly.com/dhaivat-jambudia/new-meeting"
+    sender_name: str = "Dhaivat NJ"
     messaging_dos: list[str] = Field(
         default_factory=lambda: [
             "Reference one specific recent signal",
             "Lead with their pain, not your product",
             "Keep under 120 words",
+            "Sign off with sender_name exactly",
+            "Include calendar_url in the CTA",
         ]
     )
     messaging_donts: list[str] = Field(
@@ -71,6 +74,7 @@ class ClientContext(BaseModel):
             "Never say revolutionize or game-changer",
             "No generic AI opener",
             "No fake familiarity",
+            "Never use [Your Name] or [Insert Calendar URL] placeholders",
         ]
     )
     pain_points: list[str] = Field(

@@ -112,7 +112,9 @@ def _make_personalize_node(agent: PersonalizeAgent):  # noqa: ANN001
             logger.info("langgraph:personalize no enriched leads")
             return {}
 
-        client = cfg.client_context or ClientContext()
+        from app.tools.personalize.defaults import default_client_context
+
+        client = cfg.client_context or default_client_context()
         try:
             drafts = agent.personalize_batch(batch, client)
             logger.info("langgraph:personalize queued=%d", len(drafts))

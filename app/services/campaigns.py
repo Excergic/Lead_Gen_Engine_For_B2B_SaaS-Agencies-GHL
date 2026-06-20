@@ -70,7 +70,7 @@ class CampaignService:
 
     def _ensure_client(self, client_id: UUID) -> None:
         row = self._db.table("clients").select("id").eq("id", str(client_id)).maybe_single().execute()
-        if not row.data:
+        if not row or not row.data:
             raise NotFoundError("client", client_id)
 
     def create(self, client_id: UUID, payload: CampaignCreate) -> CampaignResponse:
