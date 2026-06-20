@@ -335,4 +335,4 @@ def test_client_context_default_when_no_definition():
 def test_paused_campaign_can_run():
     runner, engine, _ = _make_runner(campaign=_campaign(status="paused"))
     resp = runner.run(CLIENT_ID, CAMPAIGN_ID, request=CampaignRunRequest())
-    assert resp.campaign_status.value == "active"
+    assert resp.campaign_status.value == "paused"

@@ -1,0 +1,37 @@
+# Git
+.git
+.gitignore
+
+# Python
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+*.egg-info
+
+# Secrets & local data
+.env
+.env.*
+!.env.example
+data/
+
+# Docs / notebooks (not needed in image)
+*.md
+!README.md
+lead_gen.ipynb
+workflow_playbook.md
+
+# Frontend (built separately)
+frontend/
+
+# IDE
+.cursor
+.vscode
+.idea
+
+# Supabase local
+supabase/.temp
+
+# Tests (not needed at runtime)
+tests/

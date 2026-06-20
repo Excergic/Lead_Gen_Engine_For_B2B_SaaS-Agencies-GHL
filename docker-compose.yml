@@ -1,0 +1,53 @@
+# Local / VPS deployment — API + Web UI
+# Usage:
+#   cp .env.example .env   # fill in secrets
+#   docker compose up --build -d
+#   open http://localhost:3000
+#
+# Migrations (once per deploy):
+#   docker compose run --rm api python scripts/run_migrations.py
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: lead-gen-api:local
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      DISCOVER_AUDIT_JSONL: /app/data/tool_audit.jsonl
+      DISCOVER_LEADS_JSONL: /app/data/discovered_leads.jsonl
+      OUTREACH_QUEUE_JSONL: /app/data/outreach_queue.jsonl
+      CORS_ORIGINS: '["http://localhost:3000"]'
+    volumes:
+      - lead_data:/app/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  web:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        BACKEND_URL: http://api:8000/api/v1
+    image: lead-gen-web:local
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://api:8000/api/v1
+      BACKEND_API_KEY: ${API_KEY}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+
+volumes:
+  lead_data:
