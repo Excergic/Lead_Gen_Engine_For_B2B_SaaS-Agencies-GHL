@@ -10,6 +10,7 @@ from app.agents.personalize import PersonalizeAgent
 from app.engine.base import PipelineRunner
 from app.engine.langgraph_workflow import LangGraphPipelineRunner
 from app.services.outreach_queue import OutreachQueueStore
+from app.tools.email.smtp_sender import SmtpEmailSender
 from app.tools.factory import ToolingBundle, build_tooling
 
 
@@ -31,6 +32,7 @@ def build_lead_gen_engine(
     outreach_queue_jsonl: Path | None = None,
     db: Any | None = None,
     email_dry_run: bool = True,
+    smtp: SmtpEmailSender | None = None,
 ) -> LeadGenEngine:
     tooling = build_tooling(
         perplexity_api_key=perplexity_api_key,
@@ -38,6 +40,7 @@ def build_lead_gen_engine(
         audit_jsonl_path=audit_jsonl_path,
         db=db,
         email_dry_run=email_dry_run,
+        smtp=smtp,
     )
     queue = OutreachQueueStore(
         jsonl_path=outreach_queue_jsonl or Path("data/outreach_queue.jsonl"),

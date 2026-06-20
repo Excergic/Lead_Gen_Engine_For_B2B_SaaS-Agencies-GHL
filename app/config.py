@@ -29,6 +29,17 @@ class Settings(BaseSettings):
     outreach_queue_jsonl: str = "data/outreach_queue.jsonl"
     email_dry_run: bool = True
 
+    # SMTP — all optional; required only when email_dry_run=false
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: SecretStr | None = None
+    smtp_password: SecretStr | None = None
+    smtp_use_tls: bool = True   # STARTTLS (port 587)
+    smtp_use_ssl: bool = False  # Implicit SSL (port 465)
+    email_from_address: str | None = None
+    email_from_name: str = ""
+    email_reply_to: str | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

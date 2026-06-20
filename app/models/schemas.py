@@ -400,3 +400,26 @@ class OutreachDraftResponse(BaseModel):
 class OutreachSendResponse(BaseModel):
     draft: dict[str, Any]
     send_result: dict[str, Any]
+
+
+# ---------------------------------------------------------------------------
+# Campaign running (Stage 2–5 pipeline triggered per campaign)
+# ---------------------------------------------------------------------------
+class CampaignRunRequest(BaseModel):
+    max_results: int = Field(default=5, ge=1, le=20)
+    enrich_limit: int = Field(default=10, ge=1, le=50)
+    personalize_limit: int = Field(default=3, ge=1, le=10)
+    run_discover: bool = True
+    run_enrich: bool = True
+    run_personalize: bool = True
+
+
+class CampaignRunResponse(BaseModel):
+    run_id: str
+    campaign_id: UUID
+    campaign_status: CampaignStatus
+    leads_discovered: int
+    leads_enriched: int
+    drafts_queued: int
+    errors: list[str]
+    message: str

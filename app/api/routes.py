@@ -12,6 +12,8 @@ from app.models.schemas import (
     CampaignCreate,
     CampaignMetricsUpdate,
     CampaignResponse,
+    CampaignRunRequest,
+    CampaignRunResponse,
     CampaignSummary,
     CampaignUpdate,
     CaseStudyCreate,
@@ -40,6 +42,7 @@ from app.models.schemas import (
     ICPProfileUpdate,
     Stage1BundleResponse,
 )
+from app.services.campaign_runner import CampaignNotFound, CampaignNotRunnable, CampaignRunnerService
 from app.services.campaigns import CampaignService, DashboardService
 from app.services.discover import build_discover_service
 from app.services.enrich import EnrichService
@@ -289,6 +292,7 @@ def _engine_deps(settings: Settings = Depends(get_settings), db: Client = Depend
             detail="PERPLEXITY_API_KEY not configured",
         )
     from app.engine.factory import build_lead_gen_engine
+    from app.tools.email.smtp_sender import smtp_sender_from_settings
 
     return build_lead_gen_engine(
         perplexity_api_key=settings.perplexity_api_key.get_secret_value(),
@@ -297,6 +301,7 @@ def _engine_deps(settings: Settings = Depends(get_settings), db: Client = Depend
         outreach_queue_jsonl=Path(settings.outreach_queue_jsonl),
         db=db,
         email_dry_run=settings.email_dry_run,
+        smtp=smtp_sender_from_settings(settings),
     )
 
 
@@ -468,3 +473,94 @@ def send_outreach(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Email connection
+# ---------------------------------------------------------------------------
+
+@router.get("/email/config")
+def get_email_config(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    """Return current email configuration (no secrets exposed)."""
+    from app.tools.email.smtp_sender import smtp_sender_from_settings
+
+    smtp = smtp_sender_from_settings(settings)
+    return {
+        "email_dry_run": settings.email_dry_run,
+        "smtp_configured": smtp is not None,
+        "smtp_host": settings.smtp_host,
+        "smtp_port": settings.smtp_port,
+        "smtp_use_tls": settings.smtp_use_tls,
+        "smtp_use_ssl": settings.smtp_use_ssl,
+        "from_email": settings.email_from_address,
+        "from_name": settings.email_from_name,
+        "reply_to": settings.email_reply_to,
+        "ready_to_send": not settings.email_dry_run and smtp is not None,
+        "hint": (
+            "Set EMAIL_DRY_RUN=false and configure SMTP_* + EMAIL_FROM_ADDRESS to enable live sending."
+            if settings.email_dry_run or smtp is None
+            else "Live email sending is enabled."
+        ),
+    }
+
+
+@router.post("/email/test")
+def test_email_connection(settings: Settings = Depends(get_settings)) -> dict[str, Any]:
+    """
+    Verify SMTP credentials without sending anything.
+    Returns {"ok": true} on success or 503 with error detail.
+    """
+    from app.tools.email.smtp_sender import SmtpConnectionError, smtp_sender_from_settings
+
+    smtp = smtp_sender_from_settings(settings)
+    if not smtp:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "SMTP not configured. Set SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, "
+                "EMAIL_FROM_ADDRESS in your .env file."
+            ),
+        )
+    try:
+        return smtp.test_connection()
+    except SmtpConnectionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Campaign running
+# ---------------------------------------------------------------------------
+
+def _campaign_runner(
+    db: Client = Depends(get_supabase_client),
+    engine=Depends(_engine_deps),
+) -> CampaignRunnerService:
+    return CampaignRunnerService(engine=engine, db=db)
+
+
+@router.post(
+    "/clients/{client_id}/campaigns/{campaign_id}/run",
+    response_model=CampaignRunResponse,
+)
+def run_campaign(
+    client_id: UUID,
+    campaign_id: UUID,
+    payload: CampaignRunRequest,
+    runner: CampaignRunnerService = Depends(_campaign_runner),
+) -> CampaignRunResponse:
+    """
+    Trigger the full pipeline (discover → enrich → personalize) for one campaign.
+
+    - Campaign must be in 'draft' or 'paused' state.
+    - Results (leads, enriched data, outreach drafts) are scoped to this campaign.
+    - Outreach drafts land in the HITL queue for human review before sending.
+    """
+    try:
+        return runner.run(client_id, campaign_id, request=payload)
+    except CampaignNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CampaignNotRunnable as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc

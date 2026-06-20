@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.tools.email.smtp_sender import SmtpEmailSender
 from app.tools.personalize.models import OutreachDraft
 
 logger = logging.getLogger(__name__)
@@ -11,7 +12,11 @@ logger = logging.getLogger(__name__)
 class SendEmailTool:
     """
     HITL-gated email send. NEVER called by agents directly.
-    Requires draft status=approved. Default: dry-run logs only.
+
+    Modes:
+      dry_run=True (default)          — logs intent only, email NOT sent.
+      dry_run=False + smtp configured — sends via SMTP after HITL approval.
+      dry_run=False + no smtp         — raises RuntimeError with config guidance.
     """
 
     name = "send_email"
@@ -20,8 +25,14 @@ class SendEmailTool:
         "Operator-only. Human must approve first, then explicitly trigger send."
     )
 
-    def __init__(self, *, dry_run: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        dry_run: bool = True,
+        smtp: SmtpEmailSender | None = None,
+    ) -> None:
         self._dry_run = dry_run
+        self._smtp = smtp
 
     def run(
         self,
@@ -51,8 +62,30 @@ class SendEmailTool:
                 "dry_run": True,
                 "to": d.email,
                 "subject": d.subject,
-                "message": "Dry-run mode — email NOT sent. Set EMAIL_DRY_RUN=false + SMTP to send.",
+                "draft_id": d.id,
+                "message": (
+                    "Dry-run mode — email NOT sent. "
+                    "Set EMAIL_DRY_RUN=false and configure SMTP to send live."
+                ),
             }
 
-        # Production: wire Instantly/Smartlead/SMTP here
-        raise NotImplementedError("Live email sending not configured — use dry_run=True")
+        # Live send
+        if not self._smtp:
+            raise RuntimeError(
+                "EMAIL_DRY_RUN=false but SMTP is not configured. "
+                "Set SMTP_HOST, SMTP_USERNAME, SMTP_PASSWORD, EMAIL_FROM_ADDRESS in your .env."
+            )
+
+        result = self._smtp.send(
+            to=d.email,
+            subject=d.subject,
+            body=d.body,
+        )
+        result["draft_id"] = d.id
+        logger.info(
+            "email_sent draft_id=%s to=%s subject=%s",
+            d.id,
+            d.email,
+            d.subject,
+        )
+        return result

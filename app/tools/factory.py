@@ -18,6 +18,7 @@ from app.tools.personalize.outreach_tools import (
     research_signals_parameters,
     write_outreach_parameters,
 )
+from app.tools.email.smtp_sender import SmtpEmailSender
 from app.tools.personalize.send_email import SendEmailTool
 from app.tools.perplexity import PerplexityWebSearchTool, perplexity_tool_parameters
 from app.tools.policy import ToolPolicy
@@ -39,6 +40,7 @@ def build_tooling(
     audit_jsonl_path: Path | None = None,
     db: Any | None = None,
     email_dry_run: bool = True,
+    smtp: SmtpEmailSender | None = None,
 ) -> ToolingBundle:
     registry = ToolRegistry()
     policy = ToolPolicy()
@@ -107,7 +109,7 @@ def build_tooling(
         )
     )
 
-    send_email = SendEmailTool(dry_run=email_dry_run)
+    send_email = SendEmailTool(dry_run=email_dry_run, smtp=smtp)
     registry.register(
         ToolSpec(
             name=send_email.name,
