@@ -1,9 +1,12 @@
+from pathlib import Path
+from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 from supabase import Client
 
 from app.api.deps import verify_api_key
+from app.config import Settings, get_settings
 from app.db.supabase import get_supabase_client
 from app.models.schemas import (
     CampaignCreate,
@@ -22,12 +25,26 @@ from app.models.schemas import (
     DailyMetricsUpsert,
     DefinitionResponse,
     DefinitionUpsert,
+    DiscoverRunRequest,
+    DiscoverRunResponse,
+    EnrichRunRequest,
+    EnrichRunResponse,
+    OutreachApproveRequest,
+    OutreachDraftResponse,
+    OutreachRejectRequest,
+    OutreachSendResponse,
+    PersonalizeRunRequest,
+    PersonalizeRunResponse,
     ICPProfileCreate,
     ICPProfileResponse,
     ICPProfileUpdate,
     Stage1BundleResponse,
 )
 from app.services.campaigns import CampaignService, DashboardService
+from app.services.discover import build_discover_service
+from app.services.enrich import EnrichService
+from app.services.personalize import PersonalizeService
+from app.services.outreach_hitl import OutreachHitlService
 from app.services.stage1 import (
     CaseStudyService,
     ClientService,
@@ -263,3 +280,191 @@ def list_daily_metrics(
     service: CampaignService = Depends(_campaigns),
 ) -> list[DailyMetricsResponse]:
     return service.list_daily_metrics(client_id, campaign_id, days=days)
+
+
+def _engine_deps(settings: Settings = Depends(get_settings), db: Client = Depends(get_supabase_client)):
+    if not settings.perplexity_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PERPLEXITY_API_KEY not configured",
+        )
+    from app.engine.factory import build_lead_gen_engine
+
+    return build_lead_gen_engine(
+        perplexity_api_key=settings.perplexity_api_key.get_secret_value(),
+        hunter_api_key=settings.hunter_api_key.get_secret_value() if settings.hunter_api_key else None,
+        audit_jsonl_path=Path(settings.discover_audit_jsonl),
+        outreach_queue_jsonl=Path(settings.outreach_queue_jsonl),
+        db=db,
+        email_dry_run=settings.email_dry_run,
+    )
+
+
+def _discover_service(
+    settings: Settings = Depends(get_settings),
+    db: Client = Depends(get_supabase_client),
+):
+    if not settings.perplexity_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="PERPLEXITY_API_KEY not configured",
+        )
+    return build_discover_service(
+        perplexity_api_key=settings.perplexity_api_key.get_secret_value(),
+        audit_jsonl_path=Path(settings.discover_audit_jsonl),
+        leads_jsonl_path=Path(settings.discover_leads_jsonl),
+        db=db,
+    )
+
+
+def _enrich_service(
+    settings: Settings = Depends(get_settings),
+    db: Client = Depends(get_supabase_client),
+    engine=Depends(_engine_deps),
+):
+    return EnrichService(
+        engine,
+        leads_jsonl_path=Path(settings.discover_leads_jsonl),
+        db=db,
+    )
+
+
+def _hitl_service(
+    settings: Settings = Depends(get_settings),
+    db: Client = Depends(get_supabase_client),
+    engine=Depends(_engine_deps),
+) -> OutreachHitlService:
+    return OutreachHitlService(engine, engine.queue, db=db)
+
+
+def _personalize_service(
+    settings: Settings = Depends(get_settings),
+    db: Client = Depends(get_supabase_client),
+    engine=Depends(_engine_deps),
+    hitl: OutreachHitlService = Depends(_hitl_service),
+) -> PersonalizeService:
+    return PersonalizeService(
+        engine,
+        hitl,
+        leads_jsonl_path=Path(settings.discover_leads_jsonl),
+        db=db,
+    )
+
+
+@router.get("/tools")
+def list_tools(service=Depends(_discover_service)) -> dict[str, Any]:
+    registry = service._engine.tooling.registry
+    policy = service._engine.tooling.policy
+    from app.tools.policy import AgentRole
+
+    return {
+        "tools": registry.list_tools(),
+        "openai_schemas": registry.openai_tools(),
+        "discover_agent_allowed": policy.allowed_tools(AgentRole.DISCOVER_AGENT),
+        "enrich_agent_allowed": policy.allowed_tools(AgentRole.ENRICH_AGENT),
+        "outreach_agent_allowed": policy.allowed_tools(AgentRole.OUTREACH_AGENT),
+    }
+
+
+@router.post("/discover/run", response_model=DiscoverRunResponse)
+def run_discover(
+    payload: DiscoverRunRequest,
+    service=Depends(_discover_service),
+) -> DiscoverRunResponse:
+    from app.tools.models import ICPId
+
+    icp_ids = [ICPId(i) for i in payload.icp_ids] if payload.icp_ids else None
+    result = service.run(
+        max_results=payload.max_results,
+        icp_ids=icp_ids,
+        persist=payload.persist,
+    )
+    return DiscoverRunResponse(**result)
+
+
+@router.post("/enrich/run", response_model=EnrichRunResponse)
+def run_enrich(
+    payload: EnrichRunRequest,
+    service: EnrichService = Depends(_enrich_service),
+) -> EnrichRunResponse:
+    result = service.run(limit=payload.limit, persist=payload.persist)
+    return EnrichRunResponse(**result)
+
+
+@router.post("/personalize/run", response_model=PersonalizeRunResponse)
+def run_personalize(
+    payload: PersonalizeRunRequest,
+    service: PersonalizeService = Depends(_personalize_service),
+) -> PersonalizeRunResponse:
+    result = service.run(
+        limit=payload.limit,
+        client_id=payload.client_id,
+        lead_ids=payload.lead_ids,
+    )
+    return PersonalizeRunResponse(**result)
+
+
+@router.get("/outreach/pending", response_model=list[OutreachDraftResponse])
+def list_pending_outreach(
+    limit: int = 50,
+    hitl: OutreachHitlService = Depends(_hitl_service),
+) -> list[OutreachDraftResponse]:
+    return [OutreachDraftResponse(**d) for d in hitl.list_pending(limit=limit)]
+
+
+@router.get("/outreach/{draft_id}", response_model=OutreachDraftResponse)
+def get_outreach_draft(
+    draft_id: str,
+    hitl: OutreachHitlService = Depends(_hitl_service),
+) -> OutreachDraftResponse:
+    try:
+        return OutreachDraftResponse(**hitl.get_draft(draft_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/outreach/{draft_id}/approve", response_model=OutreachDraftResponse)
+def approve_outreach(
+    draft_id: str,
+    payload: OutreachApproveRequest,
+    hitl: OutreachHitlService = Depends(_hitl_service),
+) -> OutreachDraftResponse:
+    try:
+        return OutreachDraftResponse(**hitl.approve(draft_id, reviewed_by=payload.reviewed_by))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/outreach/{draft_id}/reject", response_model=OutreachDraftResponse)
+def reject_outreach(
+    draft_id: str,
+    payload: OutreachRejectRequest,
+    hitl: OutreachHitlService = Depends(_hitl_service),
+) -> OutreachDraftResponse:
+    try:
+        return OutreachDraftResponse(
+            **hitl.reject(draft_id, reason=payload.reason, reviewed_by=payload.reviewed_by)
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/outreach/{draft_id}/send", response_model=OutreachSendResponse)
+def send_outreach(
+    draft_id: str,
+    hitl: OutreachHitlService = Depends(_hitl_service),
+) -> OutreachSendResponse:
+    """Explicit human-triggered send. Draft must be approved first."""
+    try:
+        result = hitl.send(draft_id)
+        return OutreachSendResponse(**result)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc

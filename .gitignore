@@ -4,4 +4,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .ruff_cache/
+data/
 workflow_playbook.md
+lead_gen.ipynb
+tool_architecture.md

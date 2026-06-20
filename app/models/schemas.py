@@ -311,3 +311,92 @@ class ClientDashboardResponse(BaseModel):
     totals: ClientDashboardTotals
     campaigns: list[CampaignSummary]
     daily_trend: list[DailyMetricsResponse]
+
+
+# ---------------------------------------------------------------------------
+# Discover (Stage 2)
+# ---------------------------------------------------------------------------
+class DiscoverRunRequest(BaseModel):
+    max_results: int = Field(default=5, ge=1, le=20)
+    icp_ids: list[str] | None = None
+    persist: bool = True
+
+
+class DiscoverRunResponse(BaseModel):
+    discovered: int
+    saved_new: int
+    tools_used: list[str]
+    leads: list[dict[str, Any]]
+
+
+class EnrichRunRequest(BaseModel):
+    limit: int = Field(default=10, ge=1, le=50)
+    persist: bool = True
+
+
+class EnrichSummary(BaseModel):
+    total: int
+    enriched_status: int
+    with_email: int
+    with_linkedin: int
+    avg_confidence: float
+
+
+class EnrichRunResponse(BaseModel):
+    processed: int
+    saved: int
+    summary: EnrichSummary
+    leads: list[dict[str, Any]]
+    message: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Stage 5 — Personalize + HITL outreach
+# ---------------------------------------------------------------------------
+class PersonalizeRunRequest(BaseModel):
+    limit: int = Field(default=3, ge=1, le=10)
+    client_id: UUID | None = None
+    lead_ids: list[str] | None = None
+
+
+class PersonalizeRunResponse(BaseModel):
+    processed: int
+    queued: int
+    client_context: str
+    drafts: list[dict[str, Any]]
+    hitl_note: str
+    message: str | None = None
+
+
+class OutreachRejectRequest(BaseModel):
+    reason: str = Field(default="", max_length=1000)
+    reviewed_by: str = Field(default="operator", max_length=100)
+
+
+class OutreachApproveRequest(BaseModel):
+    reviewed_by: str = Field(default="operator", max_length=100)
+
+
+class OutreachDraftResponse(BaseModel):
+    id: str
+    lead_id: str
+    contact_name: str | None
+    company_name: str | None
+    email: str | None
+    status: str
+    subject: str
+    hook: str
+    body: str
+    signal_used: str
+    signal_type: str
+    research: dict[str, Any]
+    created_at: str | None = None
+    reviewed_at: str | None = None
+    reviewed_by: str | None = None
+    rejection_reason: str | None = None
+    sent_at: str | None = None
+
+
+class OutreachSendResponse(BaseModel):
+    draft: dict[str, Any]
+    send_result: dict[str, Any]
