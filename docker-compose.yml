@@ -20,7 +20,7 @@ services:
       DISCOVER_AUDIT_JSONL: /app/data/tool_audit.jsonl
       DISCOVER_LEADS_JSONL: /app/data/discovered_leads.jsonl
       OUTREACH_QUEUE_JSONL: /app/data/outreach_queue.jsonl
-      CORS_ORIGINS: '["http://localhost:3000"]'
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3000"]}'
     volumes:
       - lead_data:/app/data
     ports:

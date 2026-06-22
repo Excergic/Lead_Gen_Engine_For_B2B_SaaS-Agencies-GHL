@@ -1,0 +1,37 @@
+# VPS deployment — pulls pre-built image from GHCR (API only; frontend is on Vercel)
+#
+# Setup:
+#   cp .env.example .env   # fill in all secrets
+#   docker compose -f docker-compose.vps.yml pull
+#   docker compose -f docker-compose.vps.yml up -d
+#
+# First-time migrations:
+#   docker compose -f docker-compose.vps.yml run --rm api python scripts/run_migrations.py
+#
+# Update to latest:
+#   docker compose -f docker-compose.vps.yml pull && docker compose -f docker-compose.vps.yml up -d
+
+services:
+  api:
+    image: ghcr.io/${GITHUB_USERNAME}/lead-gen-api:latest
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      ENVIRONMENT: production
+      DISCOVER_AUDIT_JSONL: /app/data/tool_audit.jsonl
+      DISCOVER_LEADS_JSONL: /app/data/discovered_leads.jsonl
+      OUTREACH_QUEUE_JSONL: /app/data/outreach_queue.jsonl
+      CORS_ORIGINS: '${CORS_ORIGINS:-["http://localhost:3000"]}'
+    volumes:
+      - lead_data:/app/data
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/api/v1/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  lead_data:
