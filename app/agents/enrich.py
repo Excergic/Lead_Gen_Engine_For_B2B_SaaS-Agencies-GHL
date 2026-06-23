@@ -4,6 +4,7 @@ import logging
 from typing import Any
 
 from app.tools.enrichment.models import EnrichedLead, ProfileEnrichment
+from app.tools.enrichment.providers import _linkedin_profile_from_source
 from app.tools.executor import ToolExecutor
 from app.tools.models import LeadCandidate, LeadStatus
 from app.tools.policy import AgentRole
@@ -21,6 +22,10 @@ class EnrichAgent:
     def enrich_lead(self, lead: LeadCandidate) -> EnrichedLead:
         enriched = EnrichedLead.from_lead(lead)
 
+        # Seed LinkedIn from discovery URL so Apollo can match before profile extract
+        if not enriched.linkedin_url:
+            enriched.linkedin_url = _linkedin_profile_from_source(lead.source_url)
+
         try:
             profile: ProfileEnrichment = self.executor.run(
                 self.actor,
@@ -34,6 +39,8 @@ class EnrichAgent:
         except Exception as exc:
             logger.warning("enrich_profile_failed url=%s err=%s", lead.source_url, exc)
 
+        linkedin_for_email = enriched.linkedin_url or _linkedin_profile_from_source(lead.source_url)
+
         try:
             email_result = self.executor.run(
                 self.actor,
@@ -41,7 +48,7 @@ class EnrichAgent:
                 domain=enriched.company_domain,
                 contact_name=enriched.contact_name,
                 company_name=enriched.company_name,
-                linkedin_url=enriched.linkedin_url,
+                linkedin_url=linkedin_for_email,
                 source_url=lead.source_url,
             )
             enriched.apply_email(email_result)

@@ -317,7 +317,7 @@ class ClientDashboardResponse(BaseModel):
 # Discover (Stage 2)
 # ---------------------------------------------------------------------------
 class DiscoverRunRequest(BaseModel):
-    max_results: int = Field(default=5, ge=1, le=20)
+    max_results: int = Field(default=20, ge=1, le=500)
     icp_ids: list[str] | None = None
     persist: bool = True
 
@@ -330,7 +330,7 @@ class DiscoverRunResponse(BaseModel):
 
 
 class EnrichRunRequest(BaseModel):
-    limit: int = Field(default=10, ge=1, le=50)
+    limit: int = Field(default=100, ge=1, le=500)
     persist: bool = True
 
 
@@ -413,9 +413,18 @@ class OutreachSendResponse(BaseModel):
 # Campaign running (Stage 2–5 pipeline triggered per campaign)
 # ---------------------------------------------------------------------------
 class CampaignRunRequest(BaseModel):
-    max_results: int = Field(default=5, ge=1, le=20)
-    enrich_limit: int = Field(default=10, ge=1, le=50)
-    personalize_limit: int = Field(default=3, ge=1, le=10)
+    max_results: int = Field(
+        default=20,
+        ge=1,
+        le=50,
+        description="Leads per run — discover, enrich, and personalize each use this cap",
+    )
+    enrich_limit: int | None = Field(
+        default=None, ge=1, le=50, description="Deprecated: synced to max_results"
+    )
+    personalize_limit: int | None = Field(
+        default=None, ge=1, le=50, description="Deprecated: synced to max_results"
+    )
     run_discover: bool = True
     run_enrich: bool = True
     run_personalize: bool = True

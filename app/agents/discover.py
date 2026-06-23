@@ -11,6 +11,8 @@ from app.tools.policy import AgentRole
 logger = logging.getLogger(__name__)
 
 MAX_QUERIES_PER_ICP_CHANNEL = 2
+# Perplexity hits requested per search call (total run cap is `max_results` in discover_all)
+PER_QUERY_RESULTS = 10
 
 
 class DiscoverAgent:
@@ -38,22 +40,28 @@ class DiscoverAgent:
         self,
         icp: ICPProfile,
         *,
-        max_results: int = 5,
+        limit: int,
+        seen_urls: set[str],
         channels: list[Channel] | None = None,
     ) -> list[LeadCandidate]:
+        """Collect up to `limit` new leads for one ICP (deduped via shared seen_urls)."""
         channels = channels or icp.channels
         leads: list[LeadCandidate] = []
-        seen_urls: set[str] = set()
 
         for channel in channels:
+            if len(leads) >= limit:
+                break
             domains = CHANNEL_DOMAINS.get(channel)
             for query in self._queries_for(icp, channel):
+                if len(leads) >= limit:
+                    break
+                per_query = min(PER_QUERY_RESULTS, limit - len(leads))
                 try:
                     hits: list[SearchHit] = self.executor.run(
                         self.actor,
                         "perplexity_web_search",
                         query=query,
-                        max_results=max_results,
+                        max_results=per_query,
                         domains=domains or None,
                         channel=channel,
                     )
@@ -62,6 +70,8 @@ class DiscoverAgent:
                     continue
 
                 for hit in hits:
+                    if len(leads) >= limit:
+                        break
                     url = str(hit.url)
                     if url in seen_urls:
                         continue
@@ -83,16 +93,29 @@ class DiscoverAgent:
     def discover_all(
         self,
         icps: list[ICPProfile] | None = None,
+        *,
+        max_results: int = 20,
         **kwargs: Any,
     ) -> list[LeadCandidate]:
+        """
+        Discover leads across ICPs until `max_results` total unique URLs are collected.
+
+        `max_results` is the campaign-level cap (not per search query).
+        """
         icps = icps or ICP_PROFILES
         all_leads: list[LeadCandidate] = []
+        seen_urls: set[str] = set()
+
         for icp in icps:
-            logger.info("discover_icp_start name=%s", icp.name)
-            batch = self.discover_icp(icp, **kwargs)
+            if len(all_leads) >= max_results:
+                break
+            remaining = max_results - len(all_leads)
+            logger.info("discover_icp_start name=%s remaining=%s", icp.name, remaining)
+            batch = self.discover_icp(icp, limit=remaining, seen_urls=seen_urls, **kwargs)
             logger.info("discover_icp_done name=%s count=%s", icp.name, len(batch))
             all_leads.extend(batch)
-        return all_leads
+
+        return all_leads[:max_results]
 
 
 def _guess_company(title: str) -> str | None:

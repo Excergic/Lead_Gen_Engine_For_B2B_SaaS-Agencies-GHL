@@ -298,6 +298,7 @@ def _engine_deps(settings: Settings = Depends(get_settings), db: Client = Depend
     return build_lead_gen_engine(
         perplexity_api_key=settings.perplexity_api_key.get_secret_value(),
         hunter_api_key=settings.hunter_api_key.get_secret_value() if settings.hunter_api_key else None,
+        apollo_api_key=settings.apollo_api_key.get_secret_value() if settings.apollo_api_key else None,
         audit_jsonl_path=Path(settings.discover_audit_jsonl),
         outreach_queue_jsonl=Path(settings.outreach_queue_jsonl),
         db=db,

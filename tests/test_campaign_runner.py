@@ -195,21 +195,25 @@ def _make_runner(
 # ---------------------------------------------------------------------------
 
 def test_happy_path_full_pipeline():
-    runner, engine, db = _make_runner()
-    req = CampaignRunRequest(max_results=3, enrich_limit=5, personalize_limit=2)
+    runner, engine, db = _make_runner(
+        pipeline_result=_make_pipeline_result(n_leads=3, n_enriched=3, n_drafts=3),
+    )
+    req = CampaignRunRequest(max_results=3)
     resp = runner.run(CLIENT_ID, CAMPAIGN_ID, request=req)
 
     assert isinstance(resp, CampaignRunResponse)
-    assert resp.leads_discovered == 2
-    assert resp.leads_enriched == 2
-    assert resp.drafts_queued == 1
+    assert resp.leads_discovered == 3
+    assert resp.leads_enriched == 3
+    assert resp.drafts_queued == 3
     assert resp.errors == []
-    assert "Discovered 2" in resp.message
+    assert "Discovered 3" in resp.message
 
-    # Pipeline was invoked
+    # Pipeline was invoked — all stages use the same cap
     engine.workflow.run.assert_called_once()
     config: PipelineConfig = engine.workflow.run.call_args[0][0]
     assert config.max_results == 3
+    assert config.enrich_limit == 3
+    assert config.personalize_limit == 3
     assert config.run_discover is True
     assert config.run_enrich is True
     assert config.run_personalize is True

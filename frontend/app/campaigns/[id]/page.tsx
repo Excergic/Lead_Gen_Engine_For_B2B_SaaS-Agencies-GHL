@@ -19,9 +19,8 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Options for campaign run
-  const [maxResults, setMaxResults] = useState(5);
-  const [enrichLimit, setEnrichLimit] = useState(10);
+  // One cap flows through discover → enrich → personalize
+  const [leadsPerRun, setLeadsPerRun] = useState(10);
   const [personalize, setPersonalize] = useState(true);
 
   useEffect(() => {
@@ -47,9 +46,7 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     setRunResult(null);
     try {
       const res = await api.campaigns.run(clientId, campaignId, {
-        max_results: maxResults,
-        enrich_limit: enrichLimit,
-        personalize_limit: 3,
+        max_results: leadsPerRun,
         run_discover: true,
         run_enrich: true,
         run_personalize: personalize,
@@ -96,28 +93,22 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
           <div className="rounded-xl border border-zinc-800/60 bg-zinc-900/40 p-5 mb-6">
             <h2 className="text-sm font-medium text-zinc-200 mb-4">Run Campaign</h2>
 
-            <div className="grid grid-cols-2 gap-4 mb-4">
+            <div className="mb-4">
               <label className="block">
-                <span className="text-xs text-zinc-500 block mb-1">Max leads to discover</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={maxResults}
-                  onChange={(e) => setMaxResults(Number(e.target.value))}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-violet-500"
-                />
-              </label>
-              <label className="block">
-                <span className="text-xs text-zinc-500 block mb-1">Enrich limit</span>
+                <span className="text-xs text-zinc-500 block mb-1">
+                  Leads per run (discover → enrich → personalize)
+                </span>
                 <input
                   type="number"
                   min={1}
                   max={50}
-                  value={enrichLimit}
-                  onChange={(e) => setEnrichLimit(Number(e.target.value))}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-violet-500"
+                  value={leadsPerRun}
+                  onChange={(e) => setLeadsPerRun(Number(e.target.value))}
+                  className="w-full max-w-xs bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-violet-500"
                 />
+                <p className="text-xs text-zinc-600 mt-1">
+                  Each lead is scraped, enriched (Apollo email lookup), then gets a unique outreach draft.
+                </p>
               </label>
             </div>
 

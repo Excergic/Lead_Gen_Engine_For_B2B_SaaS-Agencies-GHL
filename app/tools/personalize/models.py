@@ -89,6 +89,7 @@ class ClientContext(BaseModel):
 class OutreachDraft(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid4()))
     lead_id: str
+    lead_channel: str = "linkedin"  # linkedin | x | reddit
     contact_name: str | None = None
     company_name: str | None = None
     email: str | None = None

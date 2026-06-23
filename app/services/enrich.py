@@ -53,7 +53,6 @@ class EnrichService:
 
 def _public_lead_view(lead) -> dict[str, Any]:
     d = lead.model_dump()
-    # Mask email partially in logs/API if needed — show full for operator
     return {
         "id": d["id"],
         "icp_id": d["icp_id"],
@@ -73,5 +72,7 @@ def _public_lead_view(lead) -> dict[str, Any]:
         "profile_source": d.get("profile_source"),
         "email_source": d.get("email_source"),
         "source_url": d["source_url"],
+        "profile_link": d.get("profile_link") or d["source_url"],
+        "needs_human_review": d.get("needs_human_review", False),
         "meeting_booked": d["meeting_booked"],
     }

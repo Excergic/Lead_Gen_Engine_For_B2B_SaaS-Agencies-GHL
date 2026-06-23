@@ -58,6 +58,7 @@ class PersonalizeAgent:
 
         draft = OutreachDraft(
             lead_id=lead.id,
+            lead_channel=lead.channel.value,
             contact_name=lead.contact_name or signals.contact_name,
             company_name=lead.company_name or signals.company_name,
             email=lead.email,

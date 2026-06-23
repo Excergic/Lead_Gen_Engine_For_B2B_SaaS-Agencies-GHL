@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     perplexity_api_key: SecretStr | None = None
     hunter_api_key: SecretStr | None = None
+    apollo_api_key: SecretStr | None = None
     discover_audit_jsonl: str = "data/tool_audit.jsonl"
     discover_leads_jsonl: str = "data/discovered_leads.jsonl"
     outreach_queue_jsonl: str = "data/outreach_queue.jsonl"

@@ -167,6 +167,7 @@ def _draft_to_row(draft: OutreachDraft) -> dict[str, Any]:
     return {
         "id": draft.id,
         "lead_id": draft.lead_id,
+        "lead_channel": draft.lead_channel,
         "contact_name": draft.contact_name,
         "company_name": draft.company_name,
         "email": draft.email,
@@ -195,6 +196,7 @@ def _row_to_draft(row: dict[str, Any]) -> OutreachDraft:
     return OutreachDraft(
         id=str(row["id"]),
         lead_id=str(row["lead_id"]),
+        lead_channel=row.get("lead_channel") or "linkedin",
         contact_name=row.get("contact_name"),
         company_name=row.get("company_name"),
         email=row.get("email"),
