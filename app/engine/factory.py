@@ -28,6 +28,7 @@ def build_lead_gen_engine(
     *,
     perplexity_api_key: str,
     hunter_api_key: str | None = None,
+    apollo_api_key: str | None = None,
     audit_jsonl_path: Path | None = None,
     outreach_queue_jsonl: Path | None = None,
     db: Any | None = None,
@@ -37,6 +38,7 @@ def build_lead_gen_engine(
     tooling = build_tooling(
         perplexity_api_key=perplexity_api_key,
         hunter_api_key=hunter_api_key,
+        apollo_api_key=apollo_api_key,
         audit_jsonl_path=audit_jsonl_path,
         db=db,
         email_dry_run=email_dry_run,

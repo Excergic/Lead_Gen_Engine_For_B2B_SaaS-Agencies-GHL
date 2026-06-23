@@ -37,6 +37,7 @@ def build_tooling(
     *,
     perplexity_api_key: str,
     hunter_api_key: str | None = None,
+    apollo_api_key: str | None = None,
     audit_jsonl_path: Path | None = None,
     db: Any | None = None,
     email_dry_run: bool = True,
@@ -73,6 +74,7 @@ def build_tooling(
     email = EmailWaterfallTool(
         perplexity_api_key=perplexity_api_key,
         hunter_api_key=hunter_api_key,
+        apollo_api_key=apollo_api_key,
     )
     registry.register(
         ToolSpec(

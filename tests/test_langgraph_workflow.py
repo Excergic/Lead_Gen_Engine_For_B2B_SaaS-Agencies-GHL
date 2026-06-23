@@ -125,6 +125,8 @@ def test_full_pipeline_run(mock_discover_agent, mock_enrich_agent, mock_personal
     )
     cfg = PipelineConfig(
         max_results=3,
+        enrich_limit=3,
+        personalize_limit=3,
         run_discover=True,
         run_enrich=True,
         run_personalize=True,

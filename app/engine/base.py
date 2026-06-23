@@ -18,13 +18,12 @@ from app.tools.personalize.models import ClientContext, OutreachDraft
 class PipelineConfig:
     """Inputs for one pipeline run."""
 
-    # Discover
-    max_results: int = 5
+    # Discover — total unique leads to collect per run
+    max_results: int = 20
     icp_ids: list[str] | None = None
-    # Enrich
-    enrich_limit: int = 10
-    # Personalize
-    personalize_limit: int = 3
+    # Enrich / personalize default to same cap so each lead flows through all stages
+    enrich_limit: int = 20
+    personalize_limit: int = 20
     client_context: ClientContext | None = None
     # Stages to run (all True by default for a full run)
     run_discover: bool = True
@@ -34,6 +33,10 @@ class PipelineConfig:
     seed_leads: list[LeadCandidate] | None = None
     # Pre-loaded enriched leads (skip discover+enrich if provided)
     seed_enriched: list[EnrichedLead] | None = None
+
+    def pipeline_cap(self) -> int:
+        """Max leads to process per stage in a full campaign run."""
+        return self.max_results
 
 
 @dataclass

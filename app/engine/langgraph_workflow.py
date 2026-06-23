@@ -80,7 +80,8 @@ def _make_enrich_node(agent: EnrichAgent):  # noqa: ANN001
         if cfg.seed_leads:
             candidates = cfg.seed_leads + candidates
 
-        batch = candidates[: cfg.enrich_limit]
+        cap = min(cfg.enrich_limit, cfg.pipeline_cap(), len(candidates))
+        batch = candidates[:cap]
         if not batch:
             logger.info("langgraph:enrich no leads to process")
             return {}
@@ -107,7 +108,8 @@ def _make_personalize_node(agent: PersonalizeAgent):  # noqa: ANN001
         if cfg.seed_enriched:
             enriched_leads = cfg.seed_enriched + enriched_leads
 
-        batch = enriched_leads[: cfg.personalize_limit]
+        cap = min(cfg.personalize_limit, cfg.pipeline_cap(), len(enriched_leads))
+        batch = enriched_leads[:cap]
         if not batch:
             logger.info("langgraph:personalize no enriched leads")
             return {}

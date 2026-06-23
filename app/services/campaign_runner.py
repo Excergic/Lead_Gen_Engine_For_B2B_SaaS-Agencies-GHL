@@ -27,7 +27,7 @@ from app.models.schemas import CampaignRunRequest, CampaignRunResponse, Campaign
 from app.services.stage1 import DefinitionService
 from app.tools.enrichment.models import EnrichedLead
 from app.tools.icp import ICP_PROFILES
-from app.tools.models import ICPId, LeadCandidate
+from app.tools.models import Channel, ICPId, LeadCandidate
 from app.tools.personalize.defaults import merge_client_context
 from app.tools.personalize.models import ClientContext, OutreachDraft
 
@@ -80,11 +80,12 @@ class CampaignRunnerService:
         self._start_campaign(campaign_id, campaign)
         self._insert_run_row(run_id, campaign_id, request)
 
+        cap = request.max_results
         config = PipelineConfig(
-            max_results=request.max_results,
+            max_results=cap,
             icp_ids=[i.value for i in icp_ids] if icp_ids else None,
-            enrich_limit=request.enrich_limit,
-            personalize_limit=request.personalize_limit,
+            enrich_limit=cap,
+            personalize_limit=cap if request.run_personalize else 0,
             client_context=client_ctx,
             run_discover=request.run_discover,
             run_enrich=request.run_enrich,
@@ -212,15 +213,54 @@ class CampaignRunnerService:
     # Persistence
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # Channel → table routing
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _table_for(channel: Channel) -> str:
+        return {
+            Channel.LINKEDIN: "linkedin_leads",
+            Channel.X: "x_leads",
+            Channel.REDDIT: "reddit_leads",
+        }.get(channel, "linkedin_leads")
+
+    @staticmethod
+    def _channel_extra(lead: LeadCandidate) -> dict:
+        """Channel-specific columns derived from source_url / raw data."""
+        url = lead.source_url
+        if lead.channel == Channel.LINKEDIN:
+            return {
+                "linkedin_profile_url": url.split("?")[0],
+                "linkedin_post_url": url if "/posts/" in url or "/feed/" in url else None,
+                "headline": lead.signal,
+            }
+        if lead.channel == Channel.X:
+            handle = _extract_x_handle(url)
+            return {
+                "x_handle": handle,
+                "tweet_url": url if "/status/" in url else None,
+                "x_profile_url": f"https://x.com/{handle}" if handle else None,
+                "x_bio": lead.signal,
+            }
+        if lead.channel == Channel.REDDIT:
+            return {
+                "reddit_username": _extract_reddit_username(url, lead.raw),
+                "subreddit": _extract_subreddit(url),
+                "post_url": url,
+                "post_title": lead.title,
+            }
+        return {}
+
     def _persist_leads(self, leads: list[LeadCandidate], campaign_id: UUID) -> None:
         for lead in leads:
-            row = {
+            table = self._table_for(lead.channel)
+            row: dict = {
                 "id": lead.id,
                 "icp_id": lead.icp_id.value,
-                "channel": lead.channel.value,
-                "company_name": lead.company_name,
                 "contact_name": lead.contact_name,
                 "title": lead.title,
+                "company_name": lead.company_name,
                 "signal": lead.signal,
                 "source_url": lead.source_url,
                 "snippet": lead.snippet,
@@ -230,16 +270,16 @@ class CampaignRunnerService:
                 "discovered_at": lead.discovered_at.isoformat(),
                 "campaign_id": str(campaign_id),
             }
+            row.update(self._channel_extra(lead))
             try:
-                self._db.table("discovered_leads").upsert(
-                    row, on_conflict="source_url"
-                ).execute()
+                self._db.table(table).upsert(row, on_conflict="source_url").execute()
             except Exception as exc:
-                logger.warning("lead_save_failed url=%s err=%s", lead.source_url, exc)
+                logger.warning("lead_save_failed table=%s url=%s err=%s", table, lead.source_url, exc)
 
     def _persist_enriched(self, enriched: list[EnrichedLead], campaign_id: UUID) -> None:
         for lead in enriched:
-            updates = {
+            table = self._table_for(lead.channel)
+            updates: dict = {
                 "contact_name": lead.contact_name,
                 "company_name": lead.company_name,
                 "title": lead.job_title or lead.title,
@@ -248,7 +288,6 @@ class CampaignRunnerService:
                 "email_verified": lead.email_verified,
                 "phone": lead.phone,
                 "company_domain": lead.company_domain,
-                "linkedin_url": lead.linkedin_url,
                 "industry": lead.industry,
                 "company_size": lead.company_size,
                 "recent_activity": lead.recent_activity,
@@ -259,17 +298,25 @@ class CampaignRunnerService:
                 "enrichment_raw": lead.enrichment_raw,
                 "status": lead.status.value,
                 "campaign_id": str(campaign_id),
+                "needs_human_review": lead.needs_human_review,
+                "profile_link": lead.profile_link,
             }
+            # linkedin_url lives in linkedin_leads too, but x/reddit use it as a separate column
+            if lead.channel != Channel.LINKEDIN and lead.linkedin_url:
+                updates["linkedin_url"] = lead.linkedin_url
+            elif lead.channel == Channel.LINKEDIN and lead.linkedin_url:
+                updates["linkedin_profile_url"] = lead.linkedin_url
             try:
-                self._db.table("discovered_leads").update(updates).eq("id", lead.id).execute()
+                self._db.table(table).update(updates).eq("id", lead.id).execute()
             except Exception as exc:
-                logger.warning("enriched_save_failed id=%s err=%s", lead.id, exc)
+                logger.warning("enriched_save_failed table=%s id=%s err=%s", table, lead.id, exc)
 
     def _persist_drafts(self, drafts: list[OutreachDraft], campaign_id: UUID) -> None:
         for draft in drafts:
             row = {
                 "id": draft.id,
                 "lead_id": draft.lead_id,
+                "lead_channel": draft.lead_channel,
                 "contact_name": draft.contact_name,
                 "company_name": draft.company_name,
                 "email": draft.email,
@@ -382,3 +429,30 @@ class CampaignRunnerService:
             ).eq("id", run_id).execute()
         except Exception as exc:
             logger.warning("campaign_run_finish_failed err=%s", exc)
+
+
+# ---------------------------------------------------------------------------
+# URL extraction helpers
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+
+def _extract_x_handle(url: str) -> str | None:
+    """Extract @handle from https://x.com/handle/... or https://twitter.com/handle/..."""
+    m = _re.search(r"(?:x|twitter)\.com/([A-Za-z0-9_]+)", url)
+    return m.group(1) if m else None
+
+
+def _extract_subreddit(url: str) -> str | None:
+    """Extract subreddit name from a reddit.com URL."""
+    m = _re.search(r"reddit\.com/r/([A-Za-z0-9_]+)", url)
+    return m.group(1) if m else None
+
+
+def _extract_reddit_username(url: str, raw: dict) -> str | None:
+    """Extract reddit username from URL or raw dict (author field)."""
+    if raw.get("author"):
+        return str(raw["author"])
+    m = _re.search(r"reddit\.com/u(?:ser)?/([A-Za-z0-9_-]+)", url)
+    return m.group(1) if m else None

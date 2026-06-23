@@ -11,9 +11,9 @@ from app.tools.models import Channel, ICPId, LeadCandidate, LeadStatus
 
 class EnrichmentSource(StrEnum):
     PERPLEXITY_PROFILE = "perplexity_profile"
+    APOLLO = "apollo"
     HUNTER = "hunter"
     PROSPEO = "prospeo"
-    APOLLO = "apollo"
     MANUAL = "manual"
     NONE = "none"
 
@@ -56,6 +56,10 @@ class EnrichedLead(LeadCandidate):
     enrichment_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     enriched_at: datetime | None = None
     enrichment_raw: dict[str, Any] = Field(default_factory=dict)
+    # True when no direct contact (email/phone) found — human should use profile_link
+    needs_human_review: bool = False
+    # Best profile URL for human outreach (LinkedIn profile > source URL)
+    profile_link: str | None = None
 
     @classmethod
     def from_lead(cls, lead: LeadCandidate) -> EnrichedLead:
@@ -94,10 +98,20 @@ class EnrichedLead(LeadCandidate):
         self._bump_confidence(email_result.confidence)
 
     def finalize(self) -> None:
-        has_contact = bool(self.email or self.linkedin_url or self.contact_name)
-        if has_contact:
+        # Pick the best profile link for human follow-up
+        self.profile_link = self.linkedin_url or self.source_url
+
+        # Actionable = has a direct contact method (email or phone)
+        has_direct_contact = bool(self.email or self.phone)
+        has_any_contact = bool(self.email or self.phone or self.linkedin_url or self.contact_name)
+
+        if has_any_contact:
             self.status = LeadStatus.ENRICHED
             self.enriched_at = datetime.now(UTC)
+
+        # Flag for human review when no direct contact found
+        self.needs_human_review = not has_direct_contact
+
         self.enrichment_confidence = min(self.enrichment_confidence, 1.0)
 
     def _bump_confidence(self, delta: float) -> None:
