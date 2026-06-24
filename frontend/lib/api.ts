@@ -147,7 +147,16 @@ export const api = {
 
   leads: {
     list: (campaignId: string) =>
-      req<Page<Lead>>(`/campaigns/${campaignId}/leads`),
+      req<Lead[]>(`/campaigns/${campaignId}/leads`),
+    listAll: (params?: { client_id?: string; campaign_id?: string; channel?: string; min_score?: number }) => {
+      const qs = new URLSearchParams();
+      if (params?.client_id) qs.set("client_id", params.client_id);
+      if (params?.campaign_id) qs.set("campaign_id", params.campaign_id);
+      if (params?.channel) qs.set("channel", params.channel);
+      if (params?.min_score !== undefined) qs.set("min_score", String(params.min_score));
+      const query = qs.toString();
+      return req<Lead[]>(`/leads${query ? `?${query}` : ""}`);
+    },
   },
 
   enriched: {

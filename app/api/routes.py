@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from supabase import Client
 
 from app.api.deps import verify_api_key
@@ -10,6 +10,7 @@ from app.config import Settings, get_settings
 from app.db.supabase import get_supabase_client
 from app.models.schemas import (
     CampaignCreate,
+    CampaignLeadResponse,
     CampaignMetricsUpdate,
     CampaignResponse,
     CampaignRunRequest,
@@ -584,3 +585,110 @@ def run_campaign(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CampaignNotRunnable as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+# ---------------------------------------------------------------------------
+# Leads — cross-channel read endpoints
+# ---------------------------------------------------------------------------
+
+_LEAD_TABLES = {
+    "linkedin": "linkedin_leads",
+    "x": "x_leads",
+    "reddit": "reddit_leads",
+}
+
+
+def _row_to_lead_response(row: dict[str, Any], channel: str) -> CampaignLeadResponse:
+    return CampaignLeadResponse(
+        id=str(row["id"]),
+        campaign_id=str(row["campaign_id"]) if row.get("campaign_id") else None,
+        channel=channel,
+        icp_id=row.get("icp_id", ""),
+        contact_name=row.get("contact_name"),
+        job_title=row.get("job_title") or row.get("title"),
+        company_name=row.get("company_name"),
+        company_domain=row.get("company_domain"),
+        industry=row.get("industry"),
+        email=row.get("email"),
+        email_verified=bool(row.get("email_verified")),
+        phone=row.get("phone"),
+        profile_link=row.get("profile_link"),
+        source_url=row.get("source_url", ""),
+        status=row.get("status", "discovered"),
+        lead_score=int(row.get("lead_score") or 0),
+        lead_score_reason=row.get("lead_score_reason"),
+        needs_human_review=bool(row.get("needs_human_review")),
+        enrichment_confidence=float(row.get("enrichment_confidence") or 0.0),
+        discovered_at=row.get("discovered_at"),
+        enriched_at=row.get("enriched_at"),
+    )
+
+
+@router.get(
+    "/campaigns/{campaign_id}/leads",
+    response_model=list[CampaignLeadResponse],
+)
+def list_campaign_leads(
+    campaign_id: UUID,
+    channel: str | None = Query(default=None, description="Filter by channel: linkedin, x, reddit"),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Client = Depends(get_supabase_client),
+) -> list[CampaignLeadResponse]:
+    """All leads (discovered + enriched) for a campaign, sorted by lead_score desc."""
+    tables = {channel: _LEAD_TABLES[channel]} if channel and channel in _LEAD_TABLES else _LEAD_TABLES
+    results: list[CampaignLeadResponse] = []
+    for ch, table in tables.items():
+        try:
+            rows = (
+                db.table(table)
+                .select("*")
+                .eq("campaign_id", str(campaign_id))
+                .order("lead_score", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            results.extend(_row_to_lead_response(r, ch) for r in rows.data)
+        except Exception:
+            pass
+    results.sort(key=lambda l: l.lead_score, reverse=True)
+    return results[:limit]
+
+
+@router.get("/leads", response_model=list[CampaignLeadResponse])
+def list_all_leads(
+    client_id: UUID | None = Query(default=None),
+    campaign_id: UUID | None = Query(default=None),
+    channel: str | None = Query(default=None),
+    min_score: int = Query(default=0, ge=0, le=100),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Client = Depends(get_supabase_client),
+) -> list[CampaignLeadResponse]:
+    """All leads across channels with optional filters."""
+    tables = {channel: _LEAD_TABLES[channel]} if channel and channel in _LEAD_TABLES else _LEAD_TABLES
+    results: list[CampaignLeadResponse] = []
+
+    # Resolve campaign_ids for client filter
+    campaign_ids: list[str] | None = None
+    if client_id and not campaign_id:
+        try:
+            rows = db.table("campaigns").select("id").eq("client_id", str(client_id)).execute()
+            campaign_ids = [str(r["id"]) for r in rows.data]
+        except Exception:
+            campaign_ids = []
+
+    for ch, table in tables.items():
+        try:
+            q = db.table(table).select("*").gte("lead_score", min_score).order("lead_score", desc=True)
+            if campaign_id:
+                q = q.eq("campaign_id", str(campaign_id))
+            elif campaign_ids is not None:
+                if not campaign_ids:
+                    continue
+                q = q.in_("campaign_id", campaign_ids)
+            rows = q.limit(limit).execute()
+            results.extend(_row_to_lead_response(r, ch) for r in rows.data)
+        except Exception:
+            pass
+
+    results.sort(key=lambda l: l.lead_score, reverse=True)
+    return results[:limit]

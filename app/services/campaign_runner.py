@@ -300,6 +300,8 @@ class CampaignRunnerService:
                 "campaign_id": str(campaign_id),
                 "needs_human_review": lead.needs_human_review,
                 "profile_link": lead.profile_link,
+                "lead_score": lead.lead_score,
+                "lead_score_reason": lead.lead_score_reason,
             }
             # linkedin_url lives in linkedin_leads too, but x/reddit use it as a separate column
             if lead.channel != Channel.LINKEDIN and lead.linkedin_url:

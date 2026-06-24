@@ -86,7 +86,7 @@ def mock_discover_agent():
 def mock_enrich_agent():
     agent = MagicMock()
 
-    def _enrich_batch(leads):
+    def _enrich_batch(leads, client_context=None):
         return [_make_enriched(l) for l in leads]
 
     agent.enrich_batch.side_effect = _enrich_batch
@@ -185,7 +185,7 @@ def test_enrich_only_with_seed_leads(mock_discover_agent, mock_enrich_agent, moc
     assert result.leads == []          # discover was skipped
     assert len(result.enriched) == 2
     mock_discover_agent.discover_all.assert_not_called()
-    mock_enrich_agent.enrich_batch.assert_called_once_with(seeds)
+    mock_enrich_agent.enrich_batch.assert_called_once_with(seeds, client_context=None)
 
 
 # ---------------------------------------------------------------------------

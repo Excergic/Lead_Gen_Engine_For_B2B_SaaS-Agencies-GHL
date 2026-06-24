@@ -87,7 +87,7 @@ def _make_enrich_node(agent: EnrichAgent):  # noqa: ANN001
             return {}
 
         try:
-            enriched = agent.enrich_batch(batch)
+            enriched = agent.enrich_batch(batch, client_context=cfg.client_context)
             logger.info("langgraph:enrich processed=%d", len(enriched))
             return {"enriched": enriched}
         except Exception as exc:

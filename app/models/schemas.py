@@ -439,3 +439,30 @@ class CampaignRunResponse(BaseModel):
     drafts_queued: int
     errors: list[str]
     message: str
+
+
+# ---------------------------------------------------------------------------
+# Leads (cross-channel view)
+# ---------------------------------------------------------------------------
+class CampaignLeadResponse(BaseModel):
+    id: str
+    campaign_id: str | None
+    channel: str
+    icp_id: str
+    contact_name: str | None
+    job_title: str | None
+    company_name: str | None
+    company_domain: str | None
+    industry: str | None
+    email: str | None
+    email_verified: bool
+    phone: str | None
+    profile_link: str | None
+    source_url: str
+    status: str
+    lead_score: int
+    lead_score_reason: str | None
+    needs_human_review: bool
+    enrichment_confidence: float
+    discovered_at: datetime | None
+    enriched_at: datetime | None

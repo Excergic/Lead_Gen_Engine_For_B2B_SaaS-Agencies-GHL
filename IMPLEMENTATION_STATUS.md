@@ -1,7 +1,7 @@
 # Lead Gen Workflow — Implementation Status
 
 > **North star:** meeting booked on calendar.  
-> **Last updated:** 2026-06-20  
+> **Last updated:** 2026-06-23  
 > **Stack:** Python 3.12 · FastAPI · Supabase Postgres · Perplexity (search + Sonar) · uv
 
 This document captures everything built so far: code structure, database migrations, API surface, test results, and what remains.
@@ -397,3 +397,141 @@ curl -X POST http://localhost:8000/api/v1/outreach/{draft_id}/send -H "X-API-Key
 - `workflow_playbook.md` — Full pipeline playbook (if present)
 - `README.md` — Quick start (may lag behind this doc)
 - `lead_gen.ipynb` — Interactive discover/enrich notebook
+- `KNOWLEDGE_BASE.md` — Session handoff, mistakes log, runbook
+
+---
+
+## Continuation — 2026-06-23 (dev branch)
+
+Session focus: align the pipeline with the product goal (**scrape → enrich → personalized outreach per lead**), fix misleading limits, wire Apollo, and harden enrichment against real API failures.
+
+### Pipeline funnel fix (discover → enrich → personalize)
+
+**Problem (before):**
+
+| Stage | What UI implied | What actually happened |
+|-------|-----------------|------------------------|
+| Discover | “Max 20 leads” | 20 **per Perplexity query** × many queries → 300+ URLs |
+| Enrich | Enrich limit 20 | Only first 20 of discovered batch |
+| Personalize | (hidden) | Hardcoded `personalize_limit: 3` in frontend |
+
+Observed funnel: `315 discovered → 20 enriched → 3 drafts`.
+
+**Fix (after):**
+
+- **One cap per campaign run** — `max_results` is the **total unique lead URLs** collected, then the same number is enriched and personalized.
+- Expected funnel: **N → N → N** (e.g. 10 → 10 → 10).
+- Frontend: single control **“Leads per run (discover → enrich → personalize)”** replaces separate discover/enrich fields.
+- `CampaignRunnerService` sets `enrich_limit` and `personalize_limit` equal to `max_results` when building `PipelineConfig`.
+
+**Files changed:**
+
+| File | Change |
+|------|--------|
+| `app/agents/discover.py` | `max_results` = total cap; `PER_QUERY_RESULTS = 10` per search call; shared dedup across ICPs |
+| `app/engine/base.py` | Defaults aligned; added `pipeline_cap()` |
+| `app/engine/langgraph_workflow.py` | Enrich/personalize respect synced caps |
+| `app/services/campaign_runner.py` | `cap = request.max_results` for all three stages |
+| `app/models/schemas.py` | `CampaignRunRequest.max_results` le=50; enrich/personalize optional (synced server-side) |
+| `frontend/app/campaigns/[id]/page.tsx` | Single `leadsPerRun` input; removed hardcoded `personalize_limit: 3` |
+
+### Enrichment improvements (Apollo + Perplexity)
+
+**Apollo email waterfall** (`app/tools/enrichment/providers.py`):
+
+- `ApolloEmailProvider` added as first step in `EmailWaterfallTool`: **Apollo → Hunter → Perplexity**.
+- Env: `APOLLO_API_KEY` in `.env` / `.env.example`.
+- LinkedIn **post** URLs normalized to profile URLs before Apollo match  
+  e.g. `linkedin.com/posts/basuakash_...` → `linkedin.com/in/basuakash`.
+- `EnrichAgent` seeds `linkedin_url` from source URL before profile extract so Apollo can match early.
+
+**Perplexity JSON parsing:**
+
+- `_parse_json_content()` hardened for markdown fences, prose after JSON, and “Extra data” errors.
+- Fixes `enrich_profile_failed: Extra data: line 13 column 1` when Sonar appends commentary.
+
+**Apollo 403 handling:**
+
+- On 401/403: log **once** with actionable message (check key, paid plan, API credits), disable Apollo for the process, fall back to Hunter/Perplexity.
+- Stops per-lead log spam (`apollo_request_failed` × N).
+
+**`EnrichedLead` human-review fields** (`app/tools/enrichment/models.py`):
+
+- `needs_human_review: bool` — true when no email/phone (use `profile_link` for manual outreach).
+- `profile_link: str | None` — best URL for human follow-up (LinkedIn > source URL).
+- `finalize()` sets both after profile + email waterfall.
+
+### Outreach / DB
+
+- `OutreachDraft.lead_channel` (`linkedin` | `x` | `reddit`) — set in `PersonalizeAgent`, persisted in `outreach_queue._draft_to_row()` and loaded in `_row_to_draft()`.
+- `campaign_runner.py` routes leads to channel tables (`linkedin_leads`, `x_leads`, `reddit_leads`) when migration 008 is applied.
+
+### Database migrations (new, dev branch)
+
+| # | File | Status | Purpose |
+|---|------|--------|---------|
+| 006 | `20250620000006_campaign_run.sql` | Applied | `campaign_id` on leads, `campaign_runs` audit |
+| 007 | `20250623000007_human_review_fields.sql` | Applied | `needs_human_review`, `profile_link` on `discovered_leads` |
+| 008 | `20250623000008_channel_leads_reset.sql` | **Not applied** (destructive) | TRUNCATE all data; replace `discovered_leads` with `linkedin_leads` / `x_leads` / `reddit_leads`; polymorphic `outreach_drafts.lead_channel` |
+
+**Warning:** Migration 008 wipes all clients/campaigns/leads. Only run on empty/dev DB. Code is **partially** migrated: `campaign_runner` uses channel tables; `discover.py` / `leads_store.py` still reference `discovered_leads`.
+
+### Registered tools (updated)
+
+| Tool | Provider order | Notes |
+|------|----------------|-------|
+| `enrich_email` | Apollo → Hunter → Perplexity | Apollo needs paid plan + valid `APOLLO_API_KEY` |
+| `enrich_profile` | Perplexity Sonar | Robust JSON parse as of 2026-06-23 |
+
+### Automated tests
+
+pytest suite added/updated ( **48 passing** as of 2026-06-23):
+
+| File | Covers |
+|------|--------|
+| `tests/test_discover_agent.py` | Total lead cap across queries |
+| `tests/test_enrichment_providers.py` | JSON parse + LinkedIn post → profile URL |
+| `tests/test_langgraph_workflow.py` | Synced enrich/personalize limits |
+| `tests/test_campaign_runner.py` | Campaign run config caps |
+
+Run: `uv run pytest tests/ -q`
+
+### Campaign run API (updated semantics)
+
+```json
+POST /api/v1/clients/{client_id}/campaigns/{campaign_id}/run
+{
+  "max_results": 10,
+  "run_discover": true,
+  "run_enrich": true,
+  "run_personalize": true
+}
+```
+
+- `max_results` = leads per run for **all three stages**.
+- `enrich_limit` / `personalize_limit` in request body are deprecated (server syncs to `max_results`).
+
+### Known issues / ops notes (2026-06-23)
+
+| Issue | Symptom | Mitigation |
+|-------|---------|------------|
+| Apollo 403 | `apollo_api_forbidden` once per process | Verify key at Apollo → Settings → Integrations → API Keys; paid plan with enrichment credits |
+| Reddit/X leads | No email after enrich | Expected — `needs_human_review=true`, use `profile_link` |
+| LinkedIn posts in discover | Weaker enrich before fix | Post URLs now normalized to `/in/{handle}` |
+| CONVERT not built | No meetings in dashboard | Calendly URL in email only; no webhook yet |
+| Migration 008 vs code split | Campaign runner vs discover store mismatch | Apply 008 only when ready to wipe DB + finish `leads_store` / `discover` migration |
+
+### Still not built (unchanged north star)
+
+1. **Stage 6 — CONVERT** — Calendly webhook, reply inbox, `meeting_booked` automation.
+2. **LinkedIn-only discover mode** — optional filter for higher email hit rate.
+3. **Full channel-schema migration** — apply 008 + update `discover.py`, `leads_store.py`.
+4. **`GET /api/v1/health/enrichment`** — optional Apollo key smoke test at startup.
+
+### Quick verify after changes
+
+```bash
+uv run pytest tests/ -q
+uv run uvicorn main:app --reload --port 8000
+# UI: Campaign → Leads per run = 5 → Run → expect Discovered 5 / Enriched 5 / Drafts 5
+```

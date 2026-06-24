@@ -11,6 +11,7 @@ from app.tools.enrichment.providers import (
     enrich_email_parameters,
     enrich_profile_parameters,
 )
+from app.tools.enrichment.scoring import ScoreSignalTool, score_signal_parameters
 from app.tools.executor import ToolExecutor
 from app.tools.personalize.outreach_tools import (
     ResearchProspectSignalsTool,
@@ -126,6 +127,18 @@ def build_tooling(
             },
             timeout_seconds=15.0,
             max_retries=0,
+        )
+    )
+
+    score = ScoreSignalTool(api_key=perplexity_api_key)
+    registry.register(
+        ToolSpec(
+            name=score.name,
+            description=score.description,
+            handler=score.run,
+            parameters=score_signal_parameters(),
+            timeout_seconds=30.0,
+            max_retries=1,
         )
     )
 

@@ -8,13 +8,20 @@ from typing import Any
 from supabase import Client
 
 from app.tools.enrichment.models import EnrichedLead
-from app.tools.models import LeadCandidate, LeadStatus
+from app.tools.models import Channel, LeadCandidate, LeadStatus
 
 logger = logging.getLogger(__name__)
 
+# Maps Channel → table name
+_CHANNEL_TABLES: dict[str, str] = {
+    Channel.LINKEDIN: "linkedin_leads",
+    Channel.X: "x_leads",
+    Channel.REDDIT: "reddit_leads",
+}
+
 
 class LeadsStore:
-    """Load/update leads from JSONL or Supabase."""
+    """Load/update leads from JSONL or Supabase channel-specific tables."""
 
     def __init__(self, jsonl_path: Path | None = None, db: Client | None = None) -> None:
         self._jsonl_path = jsonl_path
@@ -56,6 +63,10 @@ class LeadsStore:
             return self._save_supabase_enriched(leads)
         return 0
 
+    # ------------------------------------------------------------------
+    # JSONL helpers (unchanged)
+    # ------------------------------------------------------------------
+
     def _load_enriched_jsonl(self, *, limit: int) -> list[EnrichedLead]:
         if not self._jsonl_path or not self._jsonl_path.exists():
             return []
@@ -71,17 +82,6 @@ class LeadsStore:
                 break
         return leads
 
-    def _load_enriched_supabase(self, *, limit: int) -> list[EnrichedLead]:
-        rows = (
-            self._db.table("discovered_leads")
-            .select("*")
-            .eq("status", LeadStatus.ENRICHED.value)
-            .order("enriched_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
-        return [EnrichedLead.model_validate(_supabase_to_enriched(row)) for row in rows.data]
-
     def _load_jsonl(self, *, limit: int) -> list[LeadCandidate]:
         if not self._jsonl_path or not self._jsonl_path.exists():
             return []
@@ -96,17 +96,6 @@ class LeadsStore:
             if len(leads) >= limit:
                 break
         return leads
-
-    def _load_supabase(self, *, limit: int) -> list[LeadCandidate]:
-        rows = (
-            self._db.table("discovered_leads")
-            .select("*")
-            .eq("status", LeadStatus.DISCOVERED.value)
-            .order("discovered_at", desc=True)
-            .limit(limit)
-            .execute()
-        )
-        return [LeadCandidate.model_validate(_supabase_to_lead(row)) for row in rows.data]
 
     def _save_jsonl_enriched(self, enriched: list[EnrichedLead]) -> int:
         if not self._jsonl_path or not self._jsonl_path.exists():
@@ -128,46 +117,75 @@ class LeadsStore:
         self._jsonl_path.write_text("\n".join(out) + ("\n" if out else ""))
         return updated
 
+    # ------------------------------------------------------------------
+    # Supabase — channel-specific tables
+    # ------------------------------------------------------------------
+
+    def _load_enriched_supabase(self, *, limit: int) -> list[EnrichedLead]:
+        """Load enriched leads from all three channel tables, sorted by lead_score desc."""
+        leads: list[EnrichedLead] = []
+        per_table = max(limit, 20)
+        for channel, table in _CHANNEL_TABLES.items():
+            try:
+                rows = (
+                    self._db.table(table)
+                    .select("*")
+                    .eq("status", LeadStatus.ENRICHED.value)
+                    .order("lead_score", desc=True)
+                    .limit(per_table)
+                    .execute()
+                )
+                for row in rows.data:
+                    leads.append(EnrichedLead.model_validate(_channel_row_to_enriched(row, channel)))
+            except Exception as exc:
+                logger.debug("load_enriched_supabase_failed table=%s err=%s", table, exc)
+        # Sort all results by lead_score desc, then limit
+        leads.sort(key=lambda l: l.lead_score, reverse=True)
+        return leads[:limit]
+
+    def _load_supabase(self, *, limit: int) -> list[LeadCandidate]:
+        """Load discovered leads from all channel tables."""
+        leads: list[LeadCandidate] = []
+        per_table = max(limit, 20)
+        for channel, table in _CHANNEL_TABLES.items():
+            try:
+                rows = (
+                    self._db.table(table)
+                    .select("*")
+                    .eq("status", LeadStatus.DISCOVERED.value)
+                    .order("discovered_at", desc=True)
+                    .limit(per_table)
+                    .execute()
+                )
+                for row in rows.data:
+                    leads.append(LeadCandidate.model_validate(_channel_row_to_lead(row, channel)))
+            except Exception as exc:
+                logger.debug("load_discovered_supabase_failed table=%s err=%s", table, exc)
+        leads.sort(key=lambda l: l.discovered_at, reverse=True)
+        return leads[:limit]
+
     def _save_supabase_enriched(self, enriched: list[EnrichedLead]) -> int:
         saved = 0
         for lead in enriched:
+            table = _CHANNEL_TABLES.get(lead.channel.value, "linkedin_leads")
             row = _enriched_to_row(lead)
             try:
-                self._db.table("discovered_leads").update(row).eq("id", lead.id).execute()
+                self._db.table(table).update(row).eq("id", lead.id).execute()
                 saved += 1
             except Exception as exc:
-                logger.warning("enriched_save_failed id=%s err=%s", lead.id, exc)
+                logger.warning("enriched_save_failed table=%s id=%s err=%s", table, lead.id, exc)
         return saved
 
 
-def _supabase_to_enriched(row: dict[str, Any]) -> dict[str, Any]:
-    base = _supabase_to_lead(row)
-    base.update(
-        {
-            "email": row.get("email"),
-            "email_verified": row.get("email_verified") or False,
-            "phone": row.get("phone"),
-            "company_domain": row.get("company_domain"),
-            "linkedin_url": row.get("linkedin_url"),
-            "job_title": row.get("job_title"),
-            "industry": row.get("industry"),
-            "company_size": row.get("company_size"),
-            "recent_activity": row.get("recent_activity"),
-            "profile_source": row.get("profile_source") or "none",
-            "email_source": row.get("email_source") or "none",
-            "enrichment_confidence": row.get("enrichment_confidence") or 0.0,
-            "enriched_at": row.get("enriched_at"),
-            "enrichment_raw": row.get("enrichment_raw") or {},
-        }
-    )
-    return base
+# ------------------------------------------------------------------
+# Row mapping helpers
+# ------------------------------------------------------------------
 
-
-def _supabase_to_lead(row: dict[str, Any]) -> dict[str, Any]:
+def _channel_row_to_lead(row: dict[str, Any], channel: str) -> dict[str, Any]:
     return {
         "id": str(row["id"]),
         "icp_id": row["icp_id"],
-        "channel": row["channel"],
+        "channel": channel,
         "company_name": row.get("company_name"),
         "contact_name": row.get("contact_name"),
         "title": row.get("title"),
@@ -181,6 +199,33 @@ def _supabase_to_lead(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _channel_row_to_enriched(row: dict[str, Any], channel: str) -> dict[str, Any]:
+    base = _channel_row_to_lead(row, channel)
+    base.update(
+        {
+            "email": row.get("email"),
+            "email_verified": row.get("email_verified") or False,
+            "phone": row.get("phone"),
+            "company_domain": row.get("company_domain"),
+            "linkedin_url": row.get("linkedin_url") or row.get("linkedin_profile_url"),
+            "job_title": row.get("job_title"),
+            "industry": row.get("industry"),
+            "company_size": row.get("company_size"),
+            "recent_activity": row.get("recent_activity"),
+            "profile_source": row.get("profile_source") or "none",
+            "email_source": row.get("email_source") or "none",
+            "enrichment_confidence": row.get("enrichment_confidence") or 0.0,
+            "enriched_at": row.get("enriched_at"),
+            "enrichment_raw": row.get("enrichment_raw") or {},
+            "needs_human_review": row.get("needs_human_review") or False,
+            "profile_link": row.get("profile_link"),
+            "lead_score": row.get("lead_score") or 0,
+            "lead_score_reason": row.get("lead_score_reason"),
+        }
+    )
+    return base
+
+
 def _enriched_to_row(lead: EnrichedLead) -> dict[str, Any]:
     return {
         "contact_name": lead.contact_name,
@@ -191,7 +236,6 @@ def _enriched_to_row(lead: EnrichedLead) -> dict[str, Any]:
         "email_verified": lead.email_verified,
         "phone": lead.phone,
         "company_domain": lead.company_domain,
-        "linkedin_url": lead.linkedin_url,
         "industry": lead.industry,
         "company_size": lead.company_size,
         "recent_activity": lead.recent_activity,
@@ -201,4 +245,8 @@ def _enriched_to_row(lead: EnrichedLead) -> dict[str, Any]:
         "enriched_at": lead.enriched_at.isoformat() if lead.enriched_at else None,
         "enrichment_raw": lead.enrichment_raw,
         "status": lead.status.value,
+        "needs_human_review": lead.needs_human_review,
+        "profile_link": lead.profile_link,
+        "lead_score": lead.lead_score,
+        "lead_score_reason": lead.lead_score_reason,
     }

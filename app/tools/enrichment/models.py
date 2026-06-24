@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
@@ -56,10 +57,13 @@ class EnrichedLead(LeadCandidate):
     enrichment_confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     enriched_at: datetime | None = None
     enrichment_raw: dict[str, Any] = Field(default_factory=dict)
-    # True when no direct contact (email/phone) found — human should use profile_link
+    # True only when we have zero way to contact them (no email, phone, OR native profile)
     needs_human_review: bool = False
-    # Best profile URL for human outreach (LinkedIn profile > source URL)
+    # Best URL for outreach: channel-native profile link
     profile_link: str | None = None
+    # ICP fit score (0–100) and 1-sentence reason, set by ScoreSignalTool
+    lead_score: int = 0
+    lead_score_reason: str | None = None
 
     @classmethod
     def from_lead(cls, lead: LeadCandidate) -> EnrichedLead:
@@ -98,21 +102,65 @@ class EnrichedLead(LeadCandidate):
         self._bump_confidence(email_result.confidence)
 
     def finalize(self) -> None:
-        # Pick the best profile link for human follow-up
-        self.profile_link = self.linkedin_url or self.source_url
+        # Set the best profile link based on the lead's native channel.
+        # This is the primary contact method — email is a bonus on top of it.
+        self.profile_link = _native_profile_link(self.channel, self.source_url, self.linkedin_url)
 
-        # Actionable = has a direct contact method (email or phone)
-        has_direct_contact = bool(self.email or self.phone)
-        has_any_contact = bool(self.email or self.phone or self.linkedin_url or self.contact_name)
-
+        # Enriched if we have any signal about this person
+        has_any_contact = bool(
+            self.email or self.phone or self.profile_link or self.contact_name
+        )
         if has_any_contact:
             self.status = LeadStatus.ENRICHED
             self.enriched_at = datetime.now(UTC)
 
-        # Flag for human review when no direct contact found
-        self.needs_human_review = not has_direct_contact
+        # Human review only when we have literally no way to reach them
+        # (no email, no phone, AND no profile link to message via native channel)
+        self.needs_human_review = not bool(self.email or self.phone or self.profile_link)
 
         self.enrichment_confidence = min(self.enrichment_confidence, 1.0)
 
     def _bump_confidence(self, delta: float) -> None:
         self.enrichment_confidence = min(1.0, self.enrichment_confidence + delta * 0.5)
+
+
+# ---------------------------------------------------------------------------
+# Channel-native profile URL helpers
+# ---------------------------------------------------------------------------
+
+def _native_profile_link(channel: Channel, source_url: str, linkedin_url: str | None) -> str | None:
+    """Return the best profile URL for outreach on this lead's native channel."""
+    if channel == Channel.LINKEDIN:
+        return linkedin_url or _linkedin_profile_from_url(source_url) or source_url
+
+    if channel == Channel.X:
+        handle = _extract_x_handle(source_url)
+        return f"https://x.com/{handle}" if handle else source_url
+
+    if channel == Channel.REDDIT:
+        username = _extract_reddit_username(source_url)
+        return f"https://reddit.com/u/{username}" if username else source_url
+
+    # Fallback for other channels (google_maps, web)
+    return linkedin_url or source_url
+
+
+def _linkedin_profile_from_url(url: str) -> str | None:
+    clean = url.split("?")[0]
+    if "linkedin.com/in/" in clean.lower():
+        return clean
+    m = re.search(r"linkedin\.com/posts/([a-zA-Z0-9_-]+)", clean, re.IGNORECASE)
+    if m:
+        handle = m.group(1).split("_")[0]
+        return f"https://www.linkedin.com/in/{handle}" if handle else None
+    return None
+
+
+def _extract_x_handle(url: str) -> str | None:
+    m = re.search(r"(?:x|twitter)\.com/([A-Za-z0-9_]+)", url)
+    return m.group(1) if m else None
+
+
+def _extract_reddit_username(url: str) -> str | None:
+    m = re.search(r"reddit\.com/u(?:ser)?/([A-Za-z0-9_-]+)", url)
+    return m.group(1) if m else None
