@@ -139,7 +139,9 @@ def test_full_pipeline_run(mock_discover_agent, mock_enrich_agent, mock_personal
     assert len(result.drafts) == 3
     assert result.errors == []
 
-    mock_discover_agent.discover_all.assert_called_once_with(icps=None, max_results=3)
+    mock_discover_agent.discover_all.assert_called_once_with(
+        icps=None, max_results=3, channels=None, seen_urls=set()
+    )
     mock_enrich_agent.enrich_batch.assert_called_once()
     mock_personalize_agent.personalize_batch.assert_called_once()
 

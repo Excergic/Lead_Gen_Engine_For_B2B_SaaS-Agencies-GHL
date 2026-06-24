@@ -55,6 +55,7 @@ export interface CreateClientBody {
 export interface CreateCampaignBody {
   name: string;
   icp_profile_id?: string | null;
+  channel?: "linkedin" | "x" | "reddit" | "all";
   status?: "draft" | "active" | "paused" | "completed";
 }
 

@@ -58,8 +58,17 @@ def _make_discover_node(agent: DiscoverAgent):  # noqa: ANN001
             from app.tools.icp import ICP_PROFILES
             icps = [p for p in ICP_PROFILES if p.id in {ICPId(i) for i in cfg.icp_ids}]
 
+        from app.tools.models import Channel as _Channel
+        channels = [_Channel(c) for c in cfg.channels] if cfg.channels else None
+        seen_urls: set[str] = set(cfg.seed_seen_urls) if cfg.seed_seen_urls else set()
+
         try:
-            leads = agent.discover_all(icps=icps, max_results=cfg.max_results)
+            leads = agent.discover_all(
+                icps=icps,
+                max_results=cfg.max_results,
+                channels=channels,
+                seen_urls=seen_urls,
+            )
             logger.info("langgraph:discover found=%d", len(leads))
             return {"leads": leads}
         except Exception as exc:

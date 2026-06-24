@@ -16,7 +16,8 @@ Return ONLY valid JSON:
   "reason": "<1 sentence explaining the score>"
 }
 Scoring guide: 80-100 = excellent fit, 60-79 = good fit, 40-59 = moderate fit, 0-39 = poor fit.
-Base score on: job title relevance, company size/industry match, and any recent activity signals."""
+Base score on: job title relevance, company size/industry match, and any recent activity signals.
+Fresh signals (< 24h old) indicate the prospect is actively in the market right now — weight them heavily."""
 
 
 class ScoreSignalTool:
@@ -43,13 +44,27 @@ class ScoreSignalTool:
         icp_description: str | None = None,
         offer_headline: str | None = None,
         pain_points: list[str] | None = None,
+        signal_category: str | None = None,
+        signal_freshness_hours: float | None = None,
     ) -> dict[str, Any]:
+        # Build freshness label for the prompt
+        freshness_label: str | None = None
+        if signal_freshness_hours is not None:
+            if signal_freshness_hours < 24:
+                freshness_label = f"HOT — signal is only {signal_freshness_hours:.0f}h old (within 24h)"
+            elif signal_freshness_hours < 72:
+                freshness_label = f"WARM — signal is {signal_freshness_hours:.0f}h old"
+            else:
+                freshness_label = f"Signal age: {signal_freshness_hours / 24:.0f} days old"
+
         lead_lines = [
             f"Contact: {contact_name}" if contact_name else None,
             f"Title: {job_title}" if job_title else None,
             f"Company: {company_name}" if company_name else None,
             f"Company size: {company_size}" if company_size else None,
             f"Industry: {industry}" if industry else None,
+            f"Signal type: {signal_category}" if signal_category else None,
+            f"Signal freshness: {freshness_label}" if freshness_label else None,
             f"Recent activity: {recent_activity[:300]}" if recent_activity else None,
             f"Profile: {source_url}" if source_url else None,
         ]
@@ -82,8 +97,17 @@ class ScoreSignalTool:
                 resp.raise_for_status()
                 content = resp.json()["choices"][0]["message"]["content"]
             data = _parse_json_content(content)
+            base_score = max(0, min(100, int(data.get("score") or 0)))
+            # Apply freshness bonus on top of LLM score (capped at 100)
+            bonus = 0
+            if signal_freshness_hours is not None:
+                if signal_freshness_hours < 24:
+                    bonus = 15
+                elif signal_freshness_hours < 72:
+                    bonus = 8
+            final_score = min(100, base_score + bonus)
             return {
-                "score": max(0, min(100, int(data.get("score") or 0))),
+                "score": final_score,
                 "reason": str(data.get("reason") or ""),
             }
         except Exception as exc:

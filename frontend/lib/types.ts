@@ -3,6 +3,7 @@
 export type CampaignStatus = "draft" | "active" | "paused" | "completed" | "archived";
 export type ICPTemplate = "saas_founders" | "outbound_agencies" | "ghl_saaspreneurs" | "custom";
 export type LeadChannel = "linkedin" | "x" | "reddit";
+export type CampaignChannel = "linkedin" | "x" | "reddit" | "all";
 
 export interface Client {
   id: string;
@@ -17,6 +18,7 @@ export interface Campaign {
   client_id: string;
   name: string;
   status: CampaignStatus;
+  channel: CampaignChannel;
   icp_template: ICPTemplate;
   target_region: string | null;
   leads_target: number;
@@ -41,6 +43,16 @@ export interface ClientDefinition {
 
 // ── Leads ────────────────────────────────────────────────────────────────────
 
+export type SignalCategory =
+  | "funding"
+  | "hiring"
+  | "layoffs"
+  | "pain_point"
+  | "product_launch"
+  | "competitor"
+  | "engagement"
+  | "other";
+
 export interface Lead {
   id: string;
   campaign_id: string | null;
@@ -63,6 +75,8 @@ export interface Lead {
   enrichment_confidence: number;
   discovered_at: string | null;
   enriched_at: string | null;
+  signal_category: SignalCategory;
+  signal_freshness_hours: number | null;
 }
 
 export interface EnrichedLead {

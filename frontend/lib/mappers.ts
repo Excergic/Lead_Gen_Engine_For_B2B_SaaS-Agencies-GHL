@@ -1,4 +1,4 @@
-import type { Campaign, Client, ICPTemplate } from "./types";
+import type { Campaign, CampaignChannel, Client, ICPTemplate } from "./types";
 
 /** Raw shapes returned by the FastAPI backend (snake_case, different field names). */
 
@@ -18,6 +18,7 @@ export interface BackendCampaign {
   icp_profile_id: string | null;
   name: string;
   status: string;
+  channel?: CampaignChannel;
   prospects_discovered: number;
   prospects_enriched: number;
   prospects_contacted: number;
@@ -44,6 +45,7 @@ export function mapCampaign(row: BackendCampaign): Campaign {
     client_id: row.client_id,
     name: row.name,
     status: row.status as Campaign["status"],
+    channel: row.channel ?? "all",
     icp_template: row.icp_template ?? "custom",
     target_region: null,
     leads_target: 0,

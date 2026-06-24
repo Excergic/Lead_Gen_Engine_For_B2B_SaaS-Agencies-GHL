@@ -1,16 +1,64 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Users, ExternalLink, Mail, AlertCircle, Loader2 } from "lucide-react";
+import { Users, ExternalLink, Mail, AlertCircle, Loader2, Zap } from "lucide-react";
 import PageHeader from "@/components/PageHeader";
 import { api } from "@/lib/api";
-import type { Lead, LeadChannel } from "@/lib/types";
+import type { Lead, LeadChannel, SignalCategory } from "@/lib/types";
 
 const CHANNEL_COLORS: Record<LeadChannel, string> = {
   linkedin: "text-sky-400 bg-sky-400/10",
   x: "text-zinc-300 bg-zinc-700/40",
   reddit: "text-orange-400 bg-orange-400/10",
 };
+
+const SIGNAL_LABELS: Record<SignalCategory, string> = {
+  funding: "Funding",
+  hiring: "Hiring",
+  layoffs: "Layoffs",
+  pain_point: "Pain",
+  product_launch: "Launch",
+  competitor: "Competitor",
+  engagement: "Engaged",
+  other: "",
+};
+
+const SIGNAL_COLORS: Record<SignalCategory, string> = {
+  funding: "text-emerald-400 bg-emerald-400/10",
+  hiring: "text-sky-400 bg-sky-400/10",
+  layoffs: "text-rose-400 bg-rose-400/10",
+  pain_point: "text-amber-400 bg-amber-400/10",
+  product_launch: "text-violet-400 bg-violet-400/10",
+  competitor: "text-orange-400 bg-orange-400/10",
+  engagement: "text-indigo-400 bg-indigo-400/10",
+  other: "",
+};
+
+function FreshnessTag({ hours }: { hours: number | null }) {
+  if (hours === null) return null;
+  if (hours < 24)
+    return (
+      <span className="inline-flex items-center gap-0.5 text-[10px] font-semibold text-amber-400">
+        <Zap className="w-2.5 h-2.5" />
+        {hours < 1 ? "<1h" : `${Math.round(hours)}h`} ago
+      </span>
+    );
+  if (hours < 72)
+    return (
+      <span className="text-[10px] text-zinc-500">{Math.round(hours / 24)}d ago</span>
+    );
+  return null;
+}
+
+function SignalBadge({ category }: { category: SignalCategory }) {
+  const label = SIGNAL_LABELS[category];
+  if (!label) return null;
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium ${SIGNAL_COLORS[category]}`}>
+      {label}
+    </span>
+  );
+}
 
 function ScoreBadge({ score }: { score: number }) {
   const color =
@@ -34,15 +82,25 @@ export default function LeadsPage() {
   const [error, setError] = useState<string | null>(null);
   const [channelFilter, setChannelFilter] = useState<string>("");
   const [minScore, setMinScore] = useState(0);
+  const [signalFilter, setSignalFilter] = useState<string>("");
 
   useEffect(() => {
     setLoading(true);
     api.leads
       .listAll({ channel: channelFilter || undefined, min_score: minScore || undefined })
-      .then(setLeads)
+      .then((all) => {
+        const filtered = signalFilter
+          ? all.filter((l) => l.signal_category === signalFilter)
+          : all;
+        setLeads(filtered);
+      })
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load leads"))
       .finally(() => setLoading(false));
-  }, [channelFilter, minScore]);
+  }, [channelFilter, minScore, signalFilter]);
+
+  const hotCount = leads.filter(
+    (l) => l.signal_freshness_hours !== null && l.signal_freshness_hours < 24
+  ).length;
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
@@ -50,9 +108,17 @@ export default function LeadsPage() {
         title="Leads"
         subtitle="All discovered and enriched leads across campaigns"
         action={
-          <span className="text-sm text-zinc-500">
-            {leads.length} lead{leads.length !== 1 ? "s" : ""}
-          </span>
+          <div className="flex items-center gap-3 text-sm">
+            {hotCount > 0 && (
+              <span className="flex items-center gap-1 text-amber-400 font-medium">
+                <Zap className="w-3.5 h-3.5" />
+                {hotCount} hot signal{hotCount !== 1 ? "s" : ""} &lt;24h
+              </span>
+            )}
+            <span className="text-zinc-500">
+              {leads.length} lead{leads.length !== 1 ? "s" : ""}
+            </span>
+          </div>
         }
       />
 
@@ -79,6 +145,21 @@ export default function LeadsPage() {
           <option value={60}>Score ≥ 60</option>
           <option value={80}>Score ≥ 80</option>
         </select>
+
+        <select
+          value={signalFilter}
+          onChange={(e) => setSignalFilter(e.target.value)}
+          className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1.5 text-sm text-zinc-200 focus:outline-none focus:border-violet-500"
+        >
+          <option value="">All signals</option>
+          <option value="funding">Funding</option>
+          <option value="hiring">Hiring</option>
+          <option value="layoffs">Layoffs</option>
+          <option value="pain_point">Pain point</option>
+          <option value="product_launch">Product launch</option>
+          <option value="competitor">Competitor mention</option>
+          <option value="engagement">Engagement</option>
+        </select>
       </div>
 
       {error && (
@@ -102,7 +183,7 @@ export default function LeadsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-zinc-800/60 bg-zinc-900/40">
-                {["Score", "Contact", "Company", "Channel", "Email", "Status", "Profile"].map((h) => (
+                {["Score", "Signal", "Contact", "Company", "Channel", "Email", "Profile"].map((h) => (
                   <th
                     key={h}
                     className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase tracking-wide"
@@ -114,7 +195,14 @@ export default function LeadsPage() {
             </thead>
             <tbody className="divide-y divide-zinc-800/40">
               {leads.map((lead) => (
-                <tr key={lead.id} className="hover:bg-zinc-800/20 transition-colors">
+                <tr
+                  key={lead.id}
+                  className={`hover:bg-zinc-800/20 transition-colors ${
+                    lead.signal_freshness_hours !== null && lead.signal_freshness_hours < 24
+                      ? "border-l-2 border-l-amber-500/60"
+                      : ""
+                  }`}
+                >
                   <td className="px-4 py-3">
                     <div className="flex flex-col gap-0.5">
                       <ScoreBadge score={lead.lead_score} />
@@ -126,6 +214,12 @@ export default function LeadsPage() {
                           {lead.lead_score_reason}
                         </span>
                       )}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <div className="flex flex-col gap-1">
+                      <SignalBadge category={lead.signal_category} />
+                      <FreshnessTag hours={lead.signal_freshness_hours} />
                     </div>
                   </td>
                   <td className="px-4 py-3">
@@ -158,12 +252,6 @@ export default function LeadsPage() {
                       </span>
                     ) : (
                       <span className="text-xs text-zinc-600">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs text-zinc-400 capitalize">{lead.status}</span>
-                    {lead.needs_human_review && (
-                      <span className="ml-1 text-[10px] text-amber-500">⚑ review</span>
                     )}
                   </td>
                   <td className="px-4 py-3">
