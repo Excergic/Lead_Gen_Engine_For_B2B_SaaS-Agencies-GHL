@@ -94,7 +94,16 @@ export default function LeadsPage() {
           : all;
         setLeads(filtered);
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Failed to load leads"))
+      .catch((e) => {
+        const msg = e instanceof Error ? e.message : "Failed to load leads";
+        if (msg.includes("404")) {
+          setError(
+            "Leads API not available (404). Redeploy the backend with the latest code — the /api/v1/leads endpoint is missing on the running API."
+          );
+        } else {
+          setError(msg);
+        }
+      })
       .finally(() => setLoading(false));
   }, [channelFilter, minScore, signalFilter]);
 

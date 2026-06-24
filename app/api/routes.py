@@ -621,6 +621,8 @@ def _row_to_lead_response(row: dict[str, Any], channel: str) -> CampaignLeadResp
         enrichment_confidence=float(row.get("enrichment_confidence") or 0.0),
         discovered_at=row.get("discovered_at"),
         enriched_at=row.get("enriched_at"),
+        signal_category=row.get("signal_category") or "other",
+        signal_freshness_hours=row.get("signal_freshness_hours"),
     )
 
 
