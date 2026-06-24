@@ -53,12 +53,19 @@ class DiscoverService:
         return self._save_jsonl(leads)
 
     def _save_supabase(self, leads: list[LeadCandidate]) -> int:
+        from app.tools.models import Channel
+
+        _table_map = {
+            Channel.LINKEDIN: "linkedin_leads",
+            Channel.X: "x_leads",
+            Channel.REDDIT: "reddit_leads",
+        }
         saved = 0
         for lead in leads:
+            table = _table_map.get(lead.channel, "linkedin_leads")
             row = {
                 "id": lead.id,
                 "icp_id": lead.icp_id.value,
-                "channel": lead.channel.value,
                 "company_name": lead.company_name,
                 "contact_name": lead.contact_name,
                 "title": lead.title,
@@ -71,10 +78,10 @@ class DiscoverService:
                 "discovered_at": lead.discovered_at.isoformat(),
             }
             try:
-                self._db.table("discovered_leads").upsert(row, on_conflict="source_url").execute()
+                self._db.table(table).upsert(row, on_conflict="source_url").execute()
                 saved += 1
             except Exception as exc:
-                logger.warning("lead_save_failed url=%s err=%s", lead.source_url, exc)
+                logger.warning("lead_save_failed table=%s url=%s err=%s", table, lead.source_url, exc)
         return saved
 
     def _save_jsonl(self, leads: list[LeadCandidate]) -> int:

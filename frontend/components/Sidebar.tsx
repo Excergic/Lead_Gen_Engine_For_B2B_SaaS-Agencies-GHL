@@ -7,12 +7,14 @@ import {
   Megaphone,
   Mail,
   Settings,
+  Users,
   Zap,
 } from "lucide-react";
 
 const nav = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone },
+  { href: "/leads", label: "Leads", icon: Users },
   { href: "/outreach", label: "Outreach", icon: Mail },
   { href: "/settings", label: "Settings", icon: Settings },
 ];

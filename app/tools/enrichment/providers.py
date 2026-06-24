@@ -36,7 +36,10 @@ Return ONLY valid JSON:
   "confidence": 0.0-1.0,
   "reason": "string"
 }
-Only return an email if you have high confidence from public sources. Do not guess random patterns."""
+Priority: (1) exact email from public sources. (2) If no exact email found but you know the company's
+email format (e.g. first@company.com or first.last@company.com), construct the most likely email from
+the contact name and domain — set confidence 0.3-0.5 and explain in reason. Return null only if you
+cannot determine any plausible email pattern."""
 
 
 def _parse_json_content(content: str) -> dict[str, Any]:

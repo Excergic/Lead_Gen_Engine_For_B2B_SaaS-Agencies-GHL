@@ -2,6 +2,7 @@
 
 export type CampaignStatus = "draft" | "active" | "paused" | "completed" | "archived";
 export type ICPTemplate = "saas_founders" | "outbound_agencies" | "ghl_saaspreneurs" | "custom";
+export type LeadChannel = "linkedin" | "x" | "reddit";
 
 export interface Client {
   id: string;
@@ -43,11 +44,25 @@ export interface ClientDefinition {
 export interface Lead {
   id: string;
   campaign_id: string | null;
-  company_name: string;
-  website: string | null;
-  icp_match_score: number | null;
-  source: string | null;
-  created_at: string;
+  channel: LeadChannel;
+  icp_id: string;
+  contact_name: string | null;
+  job_title: string | null;
+  company_name: string | null;
+  company_domain: string | null;
+  industry: string | null;
+  email: string | null;
+  email_verified: boolean;
+  phone: string | null;
+  profile_link: string | null;
+  source_url: string;
+  status: string;
+  lead_score: number;
+  lead_score_reason: string | null;
+  needs_human_review: boolean;
+  enrichment_confidence: number;
+  discovered_at: string | null;
+  enriched_at: string | null;
 }
 
 export interface EnrichedLead {
