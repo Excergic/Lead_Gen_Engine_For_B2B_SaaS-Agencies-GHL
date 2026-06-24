@@ -58,6 +58,10 @@ class EnrichAgent:
         except Exception as exc:
             logger.warning("enrich_email_failed url=%s err=%s", lead.source_url, exc)
 
+        # Carry signal intelligence from discovery into enriched lead
+        enriched.signal_category = lead.signal_category
+        enriched.signal_freshness_hours = lead.signal_freshness_hours
+
         # Score lead against client ICP
         try:
             score_result = self.executor.run(
@@ -73,6 +77,8 @@ class EnrichAgent:
                 icp_description=None,
                 offer_headline=client_context.offer_headline if client_context else None,
                 pain_points=client_context.pain_points if client_context else None,
+                signal_category=lead.signal_category.value,
+                signal_freshness_hours=lead.signal_freshness_hours,
             )
             enriched.lead_score = score_result.get("score", 0)
             enriched.lead_score_reason = score_result.get("reason") or None

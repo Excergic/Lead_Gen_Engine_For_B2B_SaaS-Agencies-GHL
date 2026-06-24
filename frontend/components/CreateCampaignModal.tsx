@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Loader2, X } from "lucide-react";
 import { api } from "@/lib/api";
-import type { Client, ICPTemplate } from "@/lib/types";
+import type { CampaignChannel, Client, ICPTemplate } from "@/lib/types";
 
 const ICP_OPTIONS: { value: ICPTemplate; label: string; hint: string }[] = [
   {
@@ -28,6 +28,13 @@ const ICP_OPTIONS: { value: ICPTemplate; label: string; hint: string }[] = [
   },
 ];
 
+const CHANNEL_OPTIONS: { value: CampaignChannel; label: string; hint: string }[] = [
+  { value: "all", label: "All channels", hint: "LinkedIn + X + Reddit" },
+  { value: "linkedin", label: "LinkedIn only", hint: "Profiles, posts, company pages" },
+  { value: "x", label: "X / Twitter only", hint: "Tweets, threads, bios" },
+  { value: "reddit", label: "Reddit only", hint: "Posts, comments, AMAs" },
+];
+
 interface Props {
   open: boolean;
   onClose: () => void;
@@ -40,6 +47,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
   const [newClientName, setNewClientName] = useState("");
   const [campaignName, setCampaignName] = useState("");
   const [icpTemplate, setIcpTemplate] = useState<ICPTemplate>("outbound_agencies");
+  const [channel, setChannel] = useState<CampaignChannel>("all");
   const [loadingClients, setLoadingClients] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -51,6 +59,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
     setError(null);
     setCampaignName("");
     setNewClientName("");
+    setChannel("all");
     setLoadingClients(true);
     api.clients
       .list()
@@ -97,6 +106,7 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
       const campaign = await api.campaigns.create(resolvedClientId, {
         name,
         icp_profile_id: icp.id,
+        channel,
         status: "draft",
       });
 
@@ -171,6 +181,24 @@ export default function CreateCampaignModal({ open, onClose, onCreated }: Props)
                   className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-violet-500"
                   autoFocus={!useNewClient}
                 />
+              </label>
+
+              <label className="block">
+                <span className="text-xs text-zinc-500 block mb-1">Source channel</span>
+                <select
+                  value={channel}
+                  onChange={(e) => setChannel(e.target.value as CampaignChannel)}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-violet-500"
+                >
+                  {CHANNEL_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-zinc-600 mt-1">
+                  {CHANNEL_OPTIONS.find((o) => o.value === channel)?.hint}
+                </p>
               </label>
 
               <label className="block">

@@ -79,6 +79,7 @@ class CampaignService:
             "client_id": str(client_id),
             "name": payload.name,
             "status": payload.status.value,
+            "channel": payload.channel.value,
         }
         if payload.icp_profile_id:
             insert_data["icp_profile_id"] = str(payload.icp_profile_id)
@@ -106,6 +107,8 @@ class CampaignService:
         updates = payload.model_dump(exclude_unset=True)
         if "status" in updates and updates["status"] is not None:
             updates["status"] = updates["status"].value
+        if "channel" in updates and updates["channel"] is not None:
+            updates["channel"] = updates["channel"].value
         if "icp_profile_id" in updates and updates["icp_profile_id"] is not None:
             updates["icp_profile_id"] = str(updates["icp_profile_id"])
         if "started_at" in updates and updates["started_at"] is not None:

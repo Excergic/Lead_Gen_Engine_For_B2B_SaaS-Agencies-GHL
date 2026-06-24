@@ -8,7 +8,28 @@ import PageHeader from "@/components/PageHeader";
 import StatusBadge from "@/components/StatusBadge";
 import CreateCampaignModal from "@/components/CreateCampaignModal";
 import { api } from "@/lib/api";
-import type { Campaign, Client } from "@/lib/types";
+import type { Campaign, CampaignChannel, Client } from "@/lib/types";
+
+const CHANNEL_STYLES: Record<CampaignChannel, string> = {
+  linkedin: "text-sky-400 bg-sky-400/10",
+  x: "text-zinc-300 bg-zinc-700/50",
+  reddit: "text-orange-400 bg-orange-400/10",
+  all: "text-violet-400 bg-violet-400/10",
+};
+const CHANNEL_LABELS: Record<CampaignChannel, string> = {
+  linkedin: "LinkedIn",
+  x: "X",
+  reddit: "Reddit",
+  all: "All",
+};
+
+function ChannelBadge({ channel }: { channel: CampaignChannel }) {
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${CHANNEL_STYLES[channel]}`}>
+      {CHANNEL_LABELS[channel]}
+    </span>
+  );
+}
 
 interface ClientWithCampaigns {
   client: Client;
@@ -106,7 +127,7 @@ export default function CampaignsPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-zinc-800/60 bg-zinc-900/40">
-                {["Campaign", "Client", "Status", "ICP", "Leads", "Enriched", "Emails", ""].map((h) => (
+                {["Campaign", "Client", "Status", "Channel", "ICP", "Leads", "Enriched", "Emails", ""].map((h) => (
                   <th
                     key={h}
                     className="px-4 py-3 text-left text-xs font-medium text-zinc-500 uppercase tracking-wide"
@@ -122,6 +143,9 @@ export default function CampaignsPage() {
                   <td className="px-4 py-3 font-medium text-zinc-200">{c.name}</td>
                   <td className="px-4 py-3 text-zinc-400">{client.name}</td>
                   <td className="px-4 py-3"><StatusBadge status={c.status} /></td>
+                  <td className="px-4 py-3">
+                    <ChannelBadge channel={c.channel ?? "all"} />
+                  </td>
                   <td className="px-4 py-3 text-zinc-400 capitalize">
                     {c.icp_template.replace(/_/g, " ")}
                   </td>

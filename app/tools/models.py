@@ -30,6 +30,17 @@ class LeadStatus(StrEnum):
     MEETING_BOOKED = "meeting_booked"
 
 
+class SignalCategory(StrEnum):
+    FUNDING = "funding"           # raised money, series A/B/C, seed round
+    HIRING = "hiring"             # hiring sales/marketing, posting AE/SDR roles
+    LAYOFFS = "layoffs"           # laid off, downsizing — cost pressure signal
+    PAIN_POINT = "pain_point"     # explicitly struggling, asking for help
+    PRODUCT_LAUNCH = "product_launch"  # launched, shipped, announcing
+    COMPETITOR = "competitor"     # mentioned competitor, switching from X
+    ENGAGEMENT = "engagement"     # liked/commented on relevant content
+    OTHER = "other"
+
+
 class ICPProfile(BaseModel):
     id: ICPId
     name: str
@@ -60,3 +71,6 @@ class LeadCandidate(BaseModel):
     meeting_booked: bool = False
     discovered_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     raw: dict[str, Any] = Field(default_factory=dict)
+    # Signal intelligence
+    signal_category: SignalCategory = SignalCategory.OTHER
+    signal_freshness_hours: float | None = None  # hours since the signal was published

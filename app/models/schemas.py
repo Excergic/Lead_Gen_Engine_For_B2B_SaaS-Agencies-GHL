@@ -205,15 +205,24 @@ class CampaignStatus(StrEnum):
     COMPLETED = "completed"
 
 
+class CampaignChannel(StrEnum):
+    LINKEDIN = "linkedin"
+    X = "x"
+    REDDIT = "reddit"
+    ALL = "all"
+
+
 class CampaignCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     icp_profile_id: UUID | None = None
+    channel: CampaignChannel = CampaignChannel.ALL
     status: CampaignStatus = CampaignStatus.DRAFT
 
 
 class CampaignUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     icp_profile_id: UUID | None = None
+    channel: CampaignChannel | None = None
     status: CampaignStatus | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
@@ -240,6 +249,7 @@ class CampaignResponse(TimestampedModel):
     icp_profile_id: UUID | None
     name: str
     status: CampaignStatus
+    channel: CampaignChannel = CampaignChannel.ALL
     prospects_discovered: int
     prospects_enriched: int
     prospects_contacted: int
@@ -466,3 +476,5 @@ class CampaignLeadResponse(BaseModel):
     enrichment_confidence: float
     discovered_at: datetime | None
     enriched_at: datetime | None
+    signal_category: str = "other"
+    signal_freshness_hours: float | None = None

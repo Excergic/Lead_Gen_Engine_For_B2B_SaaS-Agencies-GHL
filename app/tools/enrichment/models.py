@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from app.tools.models import Channel, ICPId, LeadCandidate, LeadStatus
+from app.tools.models import Channel, ICPId, LeadCandidate, LeadStatus, SignalCategory
 
 
 class EnrichmentSource(StrEnum):
@@ -64,6 +64,9 @@ class EnrichedLead(LeadCandidate):
     # ICP fit score (0–100) and 1-sentence reason, set by ScoreSignalTool
     lead_score: int = 0
     lead_score_reason: str | None = None
+    # Signal intelligence inherited from discovery
+    signal_category: SignalCategory = SignalCategory.OTHER
+    signal_freshness_hours: float | None = None
 
     @classmethod
     def from_lead(cls, lead: LeadCandidate) -> EnrichedLead:

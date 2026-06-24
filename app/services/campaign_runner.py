@@ -75,6 +75,8 @@ class CampaignRunnerService:
 
         icp_ids = self._resolve_icp_ids(campaign)
         client_ctx = self._load_client_context(client_id)
+        channel_filter = self._resolve_channels(campaign)
+        existing_urls = self._load_existing_source_urls(campaign_id)
 
         run_id = str(uuid.uuid4())
         self._start_campaign(campaign_id, campaign)
@@ -84,6 +86,8 @@ class CampaignRunnerService:
         config = PipelineConfig(
             max_results=cap,
             icp_ids=[i.value for i in icp_ids] if icp_ids else None,
+            channels=channel_filter,
+            seed_seen_urls=list(existing_urls) if existing_urls else None,
             enrich_limit=cap,
             personalize_limit=cap if request.run_personalize else 0,
             client_context=client_ctx,
@@ -179,6 +183,30 @@ class CampaignRunnerService:
     # ICP resolution
     # ------------------------------------------------------------------
 
+    def _load_existing_source_urls(self, campaign_id: UUID) -> set[str]:
+        """Return all source_urls already stored for this campaign (cross-run dedup)."""
+        urls: set[str] = set()
+        for table in ("linkedin_leads", "x_leads", "reddit_leads"):
+            try:
+                rows = (
+                    self._db.table(table)
+                    .select("source_url")
+                    .eq("campaign_id", str(campaign_id))
+                    .execute()
+                )
+                urls.update(r["source_url"] for r in (rows.data or []))
+            except Exception as exc:
+                logger.warning("load_existing_urls_failed table=%s err=%s", table, exc)
+        return urls
+
+    @staticmethod
+    def _resolve_channels(campaign: dict[str, Any]) -> list[str] | None:
+        """Convert campaign channel field to a channels filter list (None = all)."""
+        channel = campaign.get("channel", "all")
+        if not channel or channel == "all":
+            return None
+        return [channel]
+
     def _resolve_icp_ids(self, campaign: dict[str, Any]) -> list[ICPId]:
         """Map the campaign's DB ICP profile template to agent ICPIds."""
         icp_profile_id = campaign.get("icp_profile_id")
@@ -269,6 +297,8 @@ class CampaignRunnerService:
                 "raw": lead.raw,
                 "discovered_at": lead.discovered_at.isoformat(),
                 "campaign_id": str(campaign_id),
+                "signal_category": lead.signal_category.value,
+                "signal_freshness_hours": lead.signal_freshness_hours,
             }
             row.update(self._channel_extra(lead))
             try:
@@ -302,6 +332,8 @@ class CampaignRunnerService:
                 "profile_link": lead.profile_link,
                 "lead_score": lead.lead_score,
                 "lead_score_reason": lead.lead_score_reason,
+                "signal_category": lead.signal_category.value,
+                "signal_freshness_hours": lead.signal_freshness_hours,
             }
             # linkedin_url lives in linkedin_leads too, but x/reddit use it as a separate column
             if lead.channel != Channel.LINKEDIN and lead.linkedin_url:

@@ -29,6 +29,10 @@ class PipelineConfig:
     run_discover: bool = True
     run_enrich: bool = True
     run_personalize: bool = False
+    # Channel filter — None means all channels, otherwise restrict to given channels
+    channels: list[str] | None = None
+    # URLs already stored in DB for this campaign — discover will skip them (cross-run dedup)
+    seed_seen_urls: list[str] | None = None
     # Pre-loaded leads (skip discover if provided)
     seed_leads: list[LeadCandidate] | None = None
     # Pre-loaded enriched leads (skip discover+enrich if provided)
