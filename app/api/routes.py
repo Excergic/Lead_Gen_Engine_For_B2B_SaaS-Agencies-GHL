@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from supabase import Client
 
 from app.api.deps import verify_api_key
@@ -13,6 +13,7 @@ from app.models.schemas import (
     CampaignLeadResponse,
     CampaignMetricsUpdate,
     CampaignResponse,
+    CampaignRunAcceptedResponse,
     CampaignRunRequest,
     CampaignRunResponse,
     CampaignSummary,
@@ -44,7 +45,12 @@ from app.models.schemas import (
     ICPProfileUpdate,
     Stage1BundleResponse,
 )
-from app.services.campaign_runner import CampaignNotFound, CampaignNotRunnable, CampaignRunnerService
+from app.services.campaign_runner import (
+    CampaignNotFound,
+    CampaignNotRunnable,
+    CampaignRunNotFound,
+    CampaignRunnerService,
+)
 from app.services.campaigns import CampaignService, DashboardService
 from app.services.discover import build_discover_service
 from app.services.enrich import EnrichService
@@ -564,27 +570,55 @@ def _campaign_runner(
 
 @router.post(
     "/clients/{client_id}/campaigns/{campaign_id}/run",
-    response_model=CampaignRunResponse,
+    response_model=CampaignRunAcceptedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 def run_campaign(
     client_id: UUID,
     campaign_id: UUID,
     payload: CampaignRunRequest,
+    background_tasks: BackgroundTasks,
     runner: CampaignRunnerService = Depends(_campaign_runner),
-) -> CampaignRunResponse:
+) -> CampaignRunAcceptedResponse:
     """
-    Trigger the full pipeline (discover → enrich → personalize) for one campaign.
+    Queue the full pipeline (discover → enrich → personalize) for one campaign.
 
-    - Campaign must be in 'draft' or 'paused' state.
-    - Results (leads, enriched data, outreach drafts) are scoped to this campaign.
-    - Outreach drafts land in the HITL queue for human review before sending.
+    Returns immediately (202). Poll GET .../runs/{run_id} or campaign status until
+    the run completes — large batches can take several minutes.
     """
     try:
-        return runner.run(client_id, campaign_id, request=payload)
+        accepted = runner.accept_run(client_id, campaign_id, request=payload)
+        background_tasks.add_task(
+            runner.execute_run,
+            client_id,
+            campaign_id,
+            request=payload,
+            run_id=accepted.run_id,
+        )
+        return accepted
     except CampaignNotFound as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except CampaignNotRunnable as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get(
+    "/clients/{client_id}/campaigns/{campaign_id}/runs/{run_id}",
+    response_model=CampaignRunResponse,
+)
+def get_campaign_run(
+    client_id: UUID,
+    campaign_id: UUID,
+    run_id: str,
+    runner: CampaignRunnerService = Depends(_campaign_runner),
+) -> CampaignRunResponse:
+    """Poll run progress and final metrics after POST .../run (202)."""
+    try:
+        return runner.get_run(client_id, campaign_id, run_id)
+    except CampaignNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except CampaignRunNotFound as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 # ---------------------------------------------------------------------------

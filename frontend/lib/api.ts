@@ -1,5 +1,6 @@
 import type {
   Campaign,
+  CampaignRunAcceptedResponse,
   CampaignRunRequest,
   CampaignRunResponse,
   Client,
@@ -140,9 +141,13 @@ export const api = {
         })
       ),
     run: (clientId: string, campaignId: string, body: CampaignRunRequest) =>
-      req<CampaignRunResponse>(
+      req<CampaignRunAcceptedResponse>(
         `/clients/${clientId}/campaigns/${campaignId}/run`,
         { method: "POST", body: JSON.stringify(body) }
+      ),
+    getRun: (clientId: string, campaignId: string, runId: string) =>
+      req<CampaignRunResponse>(
+        `/clients/${clientId}/campaigns/${campaignId}/runs/${runId}`
       ),
   },
 

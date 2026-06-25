@@ -18,6 +18,12 @@ import StatusBadge from "@/components/StatusBadge";
 import { api } from "@/lib/api";
 import type { Campaign, CampaignRunResponse, Lead } from "@/lib/types";
 
+const POLL_INTERVAL_MS = 3000;
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 function ScoreBadge({ score }: { score: number }) {
   const color =
     score >= 80
@@ -52,6 +58,28 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
   const [leadsPerRun, setLeadsPerRun] = useState(10);
   const [personalize, setPersonalize] = useState(true);
 
+  const pollRunUntilDone = useCallback(
+    async (runId: string) => {
+      if (!campaignId || !clientId) return null;
+
+      for (;;) {
+        await sleep(POLL_INTERVAL_MS);
+        const updated = await api.campaigns.get(clientId, campaignId);
+        setCampaign(updated);
+
+        if (updated.status !== "active") {
+          return api.campaigns.getRun(clientId, campaignId, runId);
+        }
+
+        const runStatus = await api.campaigns.getRun(clientId, campaignId, runId);
+        if (runStatus.campaign_status !== "active") {
+          return runStatus;
+        }
+      }
+    },
+    [campaignId, clientId]
+  );
+
   useEffect(() => {
     params.then(({ id }) => setCampaignId(id));
   }, [params]);
@@ -80,6 +108,39 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     loadLeads();
   }, [loadLeads]);
 
+  useEffect(() => {
+    if (!campaignId || !clientId || !campaign || campaign.status !== "active") return;
+    if (running) return;
+
+    let cancelled = false;
+    (async () => {
+      setRunning(true);
+      setError(null);
+      try {
+        for (;;) {
+          await sleep(POLL_INTERVAL_MS);
+          const c = await api.campaigns.get(clientId, campaignId);
+          if (cancelled) return;
+          setCampaign(c);
+          if (c.status !== "active") {
+            await loadLeads();
+            break;
+          }
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Failed to track run");
+        }
+      } finally {
+        if (!cancelled) setRunning(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [campaign?.status, campaignId, clientId, loadLeads, running]);
+
   const canRun =
     !!campaign &&
     (campaign.status === "draft" || campaign.status === "paused") &&
@@ -91,13 +152,20 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
     setError(null);
     setRunResult(null);
     try {
-      const res = await api.campaigns.run(clientId, campaignId, {
+      const accepted = await api.campaigns.run(clientId, campaignId, {
         max_results: leadsPerRun,
         run_discover: true,
         run_enrich: true,
         run_personalize: personalize,
       });
-      setRunResult(res);
+      setCampaign((prev) =>
+        prev ? { ...prev, status: "active" } : prev
+      );
+
+      const result = await pollRunUntilDone(accepted.run_id);
+      if (result) {
+        setRunResult(result);
+      }
       const updated = await api.campaigns.get(clientId, campaignId);
       setCampaign(updated);
       await loadLeads();
@@ -160,7 +228,8 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
                   className="w-full max-w-xs bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-violet-500"
                 />
                 <p className="text-xs text-zinc-600 mt-1">
-                  Each lead is scraped, enriched (Apollo email lookup), then gets a unique outreach draft.
+                  Runs in the background — large batches can take several minutes. Keep this tab
+                  open or refresh later to see results.
                 </p>
               </label>
             </div>
@@ -182,7 +251,9 @@ export default function CampaignDetailPage({ params }: { params: Promise<{ id: s
             )}
 
             {campaign.status === "active" && (
-              <p className="text-xs text-amber-400 mb-4">Campaign is running…</p>
+              <p className="text-xs text-amber-400 mb-4">
+                Campaign is running in the background. Results will appear when complete.
+              </p>
             )}
 
             {campaign.status === "completed" && (

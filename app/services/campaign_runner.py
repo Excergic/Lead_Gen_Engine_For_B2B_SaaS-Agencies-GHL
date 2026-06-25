@@ -23,7 +23,13 @@ from supabase import Client
 
 from app.engine.base import PipelineConfig, PipelineResult
 from app.engine.factory import LeadGenEngine
-from app.models.schemas import CampaignRunRequest, CampaignRunResponse, CampaignStatus, ICPTemplate
+from app.models.schemas import (
+    CampaignRunAcceptedResponse,
+    CampaignRunRequest,
+    CampaignRunResponse,
+    CampaignStatus,
+    ICPTemplate,
+)
 from app.services.stage1 import DefinitionService
 from app.tools.enrichment.models import EnrichedLead
 from app.tools.icp import ICP_PROFILES
@@ -51,6 +57,10 @@ class CampaignNotRunnable(Exception):
     pass
 
 
+class CampaignRunNotFound(Exception):
+    pass
+
+
 class CampaignRunnerService:
     """Orchestrates the full pipeline (discover→enrich→personalize) for one campaign."""
 
@@ -63,6 +73,123 @@ class CampaignRunnerService:
     # Public API
     # ------------------------------------------------------------------
 
+    def accept_run(
+        self,
+        client_id: UUID,
+        campaign_id: UUID,
+        *,
+        request: CampaignRunRequest,
+    ) -> CampaignRunAcceptedResponse:
+        """Validate, mark campaign active, and create a run row (fast — safe for HTTP)."""
+        campaign = self._load_campaign(client_id, campaign_id)
+        self._validate_runnable(campaign)
+
+        run_id = str(uuid.uuid4())
+        self._start_campaign(campaign_id, campaign)
+        self._insert_run_row(run_id, campaign_id, request)
+
+        logger.info(
+            "campaign_run_accepted campaign_id=%s run_id=%s max_results=%d",
+            campaign_id,
+            run_id,
+            request.max_results,
+        )
+        return CampaignRunAcceptedResponse(
+            run_id=run_id,
+            campaign_id=campaign_id,
+            campaign_status=CampaignStatus.ACTIVE,
+        )
+
+    def execute_run(
+        self,
+        client_id: UUID,
+        campaign_id: UUID,
+        *,
+        request: CampaignRunRequest,
+        run_id: str,
+    ) -> CampaignRunResponse:
+        """Run the pipeline in the background after accept_run."""
+        try:
+            campaign = self._load_campaign(client_id, campaign_id)
+            icp_ids = self._resolve_icp_ids(campaign)
+            client_ctx = self._load_client_context(client_id)
+            channel_filter = self._resolve_channels(campaign)
+            existing_urls = self._load_existing_source_urls(campaign_id)
+
+            cap = request.max_results
+            config = PipelineConfig(
+                max_results=cap,
+                icp_ids=[i.value for i in icp_ids] if icp_ids else None,
+                channels=channel_filter,
+                seed_seen_urls=list(existing_urls) if existing_urls else None,
+                enrich_limit=cap,
+                personalize_limit=cap if request.run_personalize else 0,
+                client_context=client_ctx,
+                run_discover=request.run_discover,
+                run_enrich=request.run_enrich,
+                run_personalize=request.run_personalize,
+            )
+
+            logger.info(
+                "campaign_run_start campaign_id=%s run_id=%s icps=%s",
+                campaign_id,
+                run_id,
+                [i.value for i in icp_ids] if icp_ids else "all",
+            )
+            result = self._engine.workflow.run(config)
+            logger.info(
+                "campaign_run_done campaign_id=%s leads=%d enriched=%d drafts=%d errors=%d",
+                campaign_id,
+                len(result.leads),
+                len(result.enriched),
+                len(result.drafts),
+                len(result.errors),
+            )
+
+            self._persist_leads(result.leads, campaign_id)
+            self._persist_enriched(result.enriched, campaign_id)
+            self._persist_drafts(result.drafts, campaign_id)
+            self._update_metrics(campaign_id, result)
+            self._upsert_daily_metrics(campaign_id, result)
+            self._finish_run_row(run_id, result)
+            self._pause_campaign_after_run(campaign_id)
+
+            msg = (
+                f"Discovered {len(result.leads)}, enriched {len(result.enriched)}, "
+                f"queued {len(result.drafts)} drafts for HITL review."
+            )
+            if result.errors:
+                msg += f" {len(result.errors)} non-fatal error(s) recorded."
+
+            return CampaignRunResponse(
+                run_id=run_id,
+                campaign_id=campaign_id,
+                campaign_status=CampaignStatus.PAUSED,
+                leads_discovered=len(result.leads),
+                leads_enriched=len(result.enriched),
+                drafts_queued=len(result.drafts),
+                errors=result.errors,
+                message=msg,
+            )
+        except Exception as exc:
+            logger.exception(
+                "campaign_run_failed campaign_id=%s run_id=%s",
+                campaign_id,
+                run_id,
+            )
+            self._fail_run_row(run_id, str(exc))
+            self._pause_campaign_after_run(campaign_id)
+            return CampaignRunResponse(
+                run_id=run_id,
+                campaign_id=campaign_id,
+                campaign_status=CampaignStatus.PAUSED,
+                leads_discovered=0,
+                leads_enriched=0,
+                drafts_queued=0,
+                errors=[str(exc)],
+                message=f"Campaign run failed: {exc}",
+            )
+
     def run(
         self,
         client_id: UUID,
@@ -70,72 +197,68 @@ class CampaignRunnerService:
         *,
         request: CampaignRunRequest,
     ) -> CampaignRunResponse:
-        campaign = self._load_campaign(client_id, campaign_id)
-        self._validate_runnable(campaign)
-
-        icp_ids = self._resolve_icp_ids(campaign)
-        client_ctx = self._load_client_context(client_id)
-        channel_filter = self._resolve_channels(campaign)
-        existing_urls = self._load_existing_source_urls(campaign_id)
-
-        run_id = str(uuid.uuid4())
-        self._start_campaign(campaign_id, campaign)
-        self._insert_run_row(run_id, campaign_id, request)
-
-        cap = request.max_results
-        config = PipelineConfig(
-            max_results=cap,
-            icp_ids=[i.value for i in icp_ids] if icp_ids else None,
-            channels=channel_filter,
-            seed_seen_urls=list(existing_urls) if existing_urls else None,
-            enrich_limit=cap,
-            personalize_limit=cap if request.run_personalize else 0,
-            client_context=client_ctx,
-            run_discover=request.run_discover,
-            run_enrich=request.run_enrich,
-            run_personalize=request.run_personalize,
-        )
-
-        logger.info(
-            "campaign_run_start campaign_id=%s run_id=%s icps=%s",
+        """Synchronous run — used in tests and scripts."""
+        accepted = self.accept_run(client_id, campaign_id, request=request)
+        return self.execute_run(
+            client_id,
             campaign_id,
-            run_id,
-            [i.value for i in icp_ids] if icp_ids else "all",
-        )
-        result = self._engine.workflow.run(config)
-        logger.info(
-            "campaign_run_done campaign_id=%s leads=%d enriched=%d drafts=%d errors=%d",
-            campaign_id,
-            len(result.leads),
-            len(result.enriched),
-            len(result.drafts),
-            len(result.errors),
+            request=request,
+            run_id=accepted.run_id,
         )
 
-        self._persist_leads(result.leads, campaign_id)
-        self._persist_enriched(result.enriched, campaign_id)
-        self._persist_drafts(result.drafts, campaign_id)
-        self._update_metrics(campaign_id, result)
-        self._upsert_daily_metrics(campaign_id, result)
-        self._finish_run_row(run_id, result)
-        self._pause_campaign_after_run(campaign_id)
-
-        msg = (
-            f"Discovered {len(result.leads)}, enriched {len(result.enriched)}, "
-            f"queued {len(result.drafts)} drafts for HITL review."
+    def get_run(
+        self,
+        client_id: UUID,
+        campaign_id: UUID,
+        run_id: str,
+    ) -> CampaignRunResponse:
+        self._load_campaign(client_id, campaign_id)
+        row = (
+            self._db.table("campaign_runs")
+            .select("*")
+            .eq("id", run_id)
+            .eq("campaign_id", str(campaign_id))
+            .maybe_single()
+            .execute()
         )
-        if result.errors:
-            msg += f" {len(result.errors)} non-fatal error(s) recorded."
+        if not row.data:
+            raise CampaignRunNotFound(f"Run {run_id} not found")
+
+        data = row.data
+
+        status = data.get("status", "running")
+        if status == "running":
+            message = "Campaign run is still in progress."
+        elif status == "failed":
+            errors = data.get("errors") or []
+            message = errors[0] if errors else "Campaign run failed."
+        else:
+            discovered = data.get("leads_discovered", 0)
+            enriched = data.get("leads_enriched", 0)
+            drafts = data.get("drafts_queued", 0)
+            message = (
+                f"Discovered {discovered}, enriched {enriched}, "
+                f"queued {drafts} drafts for HITL review."
+            )
+
+        campaign_status = (
+            CampaignStatus.ACTIVE
+            if status == "running"
+            else CampaignStatus.PAUSED
+        )
+        errors = data.get("errors") or []
+        if isinstance(errors, str):
+            errors = [errors]
 
         return CampaignRunResponse(
             run_id=run_id,
             campaign_id=campaign_id,
-            campaign_status=CampaignStatus.PAUSED,
-            leads_discovered=len(result.leads),
-            leads_enriched=len(result.enriched),
-            drafts_queued=len(result.drafts),
-            errors=result.errors,
-            message=msg,
+            campaign_status=campaign_status,
+            leads_discovered=int(data.get("leads_discovered") or 0),
+            leads_enriched=int(data.get("leads_enriched") or 0),
+            drafts_queued=int(data.get("drafts_queued") or 0),
+            errors=errors,
+            message=message,
         )
 
     # ------------------------------------------------------------------
@@ -463,6 +586,18 @@ class CampaignRunnerService:
             ).eq("id", run_id).execute()
         except Exception as exc:
             logger.warning("campaign_run_finish_failed err=%s", exc)
+
+    def _fail_run_row(self, run_id: str, error: str) -> None:
+        try:
+            self._db.table("campaign_runs").update(
+                {
+                    "status": "failed",
+                    "errors": [error],
+                    "completed_at": datetime.now(UTC).isoformat(),
+                }
+            ).eq("id", run_id).execute()
+        except Exception as exc:
+            logger.warning("campaign_run_fail_update_failed err=%s", exc)
 
 
 # ---------------------------------------------------------------------------

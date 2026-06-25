@@ -440,6 +440,18 @@ class CampaignRunRequest(BaseModel):
     run_personalize: bool = True
 
 
+class CampaignRunAcceptedResponse(BaseModel):
+    """Returned immediately when a run is queued (HTTP 202)."""
+
+    run_id: str
+    campaign_id: UUID
+    campaign_status: CampaignStatus
+    message: str = (
+        "Campaign run started in the background. Poll campaign status or "
+        "GET /runs/{run_id} for completion."
+    )
+
+
 class CampaignRunResponse(BaseModel):
     run_id: str
     campaign_id: UUID
