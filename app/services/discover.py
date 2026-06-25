@@ -78,10 +78,19 @@ class DiscoverService:
                 "discovered_at": lead.discovered_at.isoformat(),
             }
             try:
-                self._db.table(table).upsert(row, on_conflict="source_url").execute()
+                self._db.table(table).upsert(row, on_conflict="campaign_id,source_url").execute()
                 saved += 1
             except Exception as exc:
-                logger.warning("lead_save_failed table=%s url=%s err=%s", table, lead.source_url, exc)
+                try:
+                    self._db.table(table).upsert(row, on_conflict="source_url").execute()
+                    saved += 1
+                except Exception as exc2:
+                    logger.warning(
+                        "lead_save_failed table=%s url=%s err=%s",
+                        table,
+                        lead.source_url,
+                        exc2,
+                    )
         return saved
 
     def _save_jsonl(self, leads: list[LeadCandidate]) -> int:

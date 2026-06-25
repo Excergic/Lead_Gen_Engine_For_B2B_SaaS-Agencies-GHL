@@ -1,4 +1,5 @@
 from pathlib import Path
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -66,6 +67,8 @@ from app.services.stage1 import (
 
 public_router = APIRouter(prefix="/api/v1")
 router = APIRouter(prefix="/api/v1", dependencies=[Depends(verify_api_key)])
+
+logger = logging.getLogger(__name__)
 
 
 def _clients(db: Client = Depends(get_supabase_client)) -> ClientService:
@@ -684,8 +687,13 @@ def list_campaign_leads(
                 .execute()
             )
             results.extend(_row_to_lead_response(r, ch) for r in rows.data)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "list_campaign_leads_failed table=%s campaign_id=%s err=%s",
+                table,
+                campaign_id,
+                exc,
+            )
     results.sort(key=lambda l: l.lead_score, reverse=True)
     return results[:limit]
 
@@ -723,8 +731,8 @@ def list_all_leads(
                 q = q.in_("campaign_id", campaign_ids)
             rows = q.limit(limit).execute()
             results.extend(_row_to_lead_response(r, ch) for r in rows.data)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("list_all_leads_failed table=%s err=%s", table, exc)
 
     results.sort(key=lambda l: l.lead_score, reverse=True)
     return results[:limit]
