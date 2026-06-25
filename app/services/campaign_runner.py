@@ -33,6 +33,16 @@ from app.tools.personalize.models import ClientContext, OutreachDraft
 
 logger = logging.getLogger(__name__)
 
+
+def _normalize_url(url: str) -> str:
+    """Normalize a URL for dedup: lowercase, strip query/fragment/trailing slash."""
+    url = url.strip().lower()
+    for sep in ("?", "#"):
+        if sep in url:
+            url = url[: url.index(sep)]
+    return url.rstrip("/")
+
+
 # Map the client-facing ICP template names to hardcoded ICPId values used by
 # the discover agent.  CUSTOM falls back to running all ICPs.
 _TEMPLATE_TO_ICP_IDS: dict[str, list[ICPId]] = {
@@ -281,16 +291,40 @@ class CampaignRunnerService:
         return {}
 
     def _persist_leads(self, leads: list[LeadCandidate], campaign_id: UUID) -> None:
+        # Fetch already-saved URLs for this campaign to skip re-inserting the same leads
+        existing_urls: set[str] = set()
+        try:
+            rows = (
+                self._db.table("discovered_leads")
+                .select("source_url")
+                .eq("campaign_id", str(campaign_id))
+                .execute()
+            )
+            existing_urls = {_normalize_url(r["source_url"]) for r in rows.data}
+        except Exception as exc:
+            logger.warning("lead_dedup_fetch_failed campaign_id=%s err=%s", campaign_id, exc)
+
+        saved = skipped = 0
         for lead in leads:
+<<<<<<< HEAD
             table = self._table_for(lead.channel)
             row: dict = {
                 "id": lead.id,
+=======
+            norm_url = _normalize_url(lead.source_url)
+            if norm_url in existing_urls:
+                skipped += 1
+                continue
+            existing_urls.add(norm_url)  # prevent dupes within this batch too
+
+            row = {
+>>>>>>> c5810e4 (track of campagin for duplication of lead)
                 "icp_id": lead.icp_id.value,
                 "contact_name": lead.contact_name,
                 "title": lead.title,
                 "company_name": lead.company_name,
                 "signal": lead.signal,
-                "source_url": lead.source_url,
+                "source_url": norm_url,
                 "snippet": lead.snippet,
                 "status": lead.status.value,
                 "meeting_booked": lead.meeting_booked,
@@ -302,9 +336,23 @@ class CampaignRunnerService:
             }
             row.update(self._channel_extra(lead))
             try:
+<<<<<<< HEAD
                 self._db.table(table).upsert(row, on_conflict="source_url").execute()
+=======
+                self._db.table("discovered_leads").upsert(
+                    row, on_conflict="campaign_id,source_url"
+                ).execute()
+                saved += 1
+>>>>>>> c5810e4 (track of campagin for duplication of lead)
             except Exception as exc:
                 logger.warning("lead_save_failed table=%s url=%s err=%s", table, lead.source_url, exc)
+
+        logger.info(
+            "lead_persist_done campaign_id=%s saved=%d skipped_duplicate=%d",
+            campaign_id,
+            saved,
+            skipped,
+        )
 
     def _persist_enriched(self, enriched: list[EnrichedLead], campaign_id: UUID) -> None:
         for lead in enriched:
