@@ -122,6 +122,13 @@ export interface CampaignRunRequest {
   run_personalize?: boolean;
 }
 
+export interface CampaignRunAcceptedResponse {
+  run_id: string;
+  campaign_id: string;
+  campaign_status: CampaignStatus;
+  message: string;
+}
+
 export interface CampaignRunResponse {
   run_id: string;
   campaign_id: string;
