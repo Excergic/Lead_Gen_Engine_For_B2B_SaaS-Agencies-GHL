@@ -1,19 +1,20 @@
 # VPS deployment — pulls pre-built image from GHCR (API only; frontend is on Vercel)
 #
-# Setup:
-#   cp .env.example .env   # fill in all secrets
+# One-time VPS setup:
+#   git clone <repo> ~/lead_gen_workflow && cd ~/lead_gen_workflow
+#   cp .env.example .env   # fill in all secrets (include GITHUB_USERNAME=excergic)
 #   docker compose -f docker-compose.vps.yml pull
 #   docker compose -f docker-compose.vps.yml up -d
 #
-# First-time migrations:
-#   docker compose -f docker-compose.vps.yml run --rm api python scripts/run_migrations.py
+# Continuous deployment: push to main → GitHub Actions builds image + runs
+# scripts/remote-deploy.sh on the VPS (see .github/workflows/release.yml).
 #
-# Update to latest:
-#   docker compose -f docker-compose.vps.yml pull && docker compose -f docker-compose.vps.yml up -d
+# Manual update:
+#   ./scripts/remote-deploy.sh
 
 services:
   api:
-    image: ghcr.io/${GITHUB_USERNAME}/lead-gen-api:latest
+    image: ghcr.io/${GITHUB_USERNAME:-excergic}/lead-gen-api:latest
     restart: unless-stopped
     env_file: .env
     environment:
