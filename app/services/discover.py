@@ -13,15 +13,6 @@ from app.tools.models import ICPId, LeadCandidate
 logger = logging.getLogger(__name__)
 
 
-def _normalize_url(url: str) -> str:
-    """Normalize a URL for dedup: lowercase, strip query/fragment/trailing slash."""
-    url = url.strip().lower()
-    for sep in ("?", "#"):
-        if sep in url:
-            url = url[: url.index(sep)]
-    return url.rstrip("/")
-
-
 class DiscoverService:
     def __init__(
         self,
@@ -71,18 +62,15 @@ class DiscoverService:
         }
         saved = 0
         for lead in leads:
-<<<<<<< HEAD
             table = _table_map.get(lead.channel, "linkedin_leads")
-=======
-            norm_url = _normalize_url(lead.source_url)
->>>>>>> c5810e4 (track of campagin for duplication of lead)
             row = {
+                "id": lead.id,
                 "icp_id": lead.icp_id.value,
                 "company_name": lead.company_name,
                 "contact_name": lead.contact_name,
                 "title": lead.title,
                 "signal": lead.signal,
-                "source_url": norm_url,
+                "source_url": lead.source_url,
                 "snippet": lead.snippet,
                 "status": lead.status.value,
                 "meeting_booked": lead.meeting_booked,
