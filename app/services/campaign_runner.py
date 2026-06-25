@@ -149,6 +149,9 @@ class CampaignRunnerService:
             self._persist_leads(result.leads, campaign_id)
             self._persist_enriched(result.enriched, campaign_id)
             self._persist_drafts(result.drafts, campaign_id)
+            persist_errors = getattr(self, "_last_persist_errors", [])
+            if persist_errors:
+                result.errors.extend(persist_errors)
             self._update_metrics(campaign_id, result)
             self._upsert_daily_metrics(campaign_id, result)
             self._finish_run_row(run_id, result)
@@ -403,7 +406,36 @@ class CampaignRunnerService:
             }
         return {}
 
-    def _persist_leads(self, leads: list[LeadCandidate], campaign_id: UUID) -> None:
+    def _upsert_lead_row(self, table: str, row: dict[str, Any]) -> None:
+        """Upsert a lead; supports per-campaign and legacy global source_url constraints."""
+        conflicts = ("campaign_id,source_url", "source_url")
+        slim = {
+            k: v
+            for k, v in row.items()
+            if k not in ("signal_category", "signal_freshness_hours")
+        }
+        payloads = [row] if row == slim else [row, slim]
+        last_exc: Exception | None = None
+
+        for on_conflict in conflicts:
+            for payload in payloads:
+                try:
+                    self._db.table(table).upsert(payload, on_conflict=on_conflict).execute()
+                    return
+                except Exception as exc:
+                    last_exc = exc
+                    err = str(exc).lower()
+                    if "column" in err and payload is row:
+                        continue
+                    if "unique or exclusion constraint" in err or "on conflict" in err:
+                        break
+                    raise
+
+        if last_exc:
+            raise last_exc
+
+    def _persist_leads(self, leads: list[LeadCandidate], campaign_id: UUID) -> list[str]:
+        errors: list[str] = []
         for lead in leads:
             table = self._table_for(lead.channel)
             row: dict = {
@@ -425,9 +457,13 @@ class CampaignRunnerService:
             }
             row.update(self._channel_extra(lead))
             try:
-                self._db.table(table).upsert(row, on_conflict="source_url").execute()
+                self._upsert_lead_row(table, row)
             except Exception as exc:
-                logger.warning("lead_save_failed table=%s url=%s err=%s", table, lead.source_url, exc)
+                msg = f"lead_save_failed table={table} url={lead.source_url}: {exc}"
+                errors.append(msg)
+                logger.error(msg)
+        self._last_persist_errors = errors
+        return errors
 
     def _persist_enriched(self, enriched: list[EnrichedLead], campaign_id: UUID) -> None:
         for lead in enriched:

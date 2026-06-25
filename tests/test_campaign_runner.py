@@ -340,3 +340,55 @@ def test_paused_campaign_can_run():
     runner, engine, _ = _make_runner(campaign=_campaign(status="paused"))
     resp = runner.run(CLIENT_ID, CAMPAIGN_ID, request=CampaignRunRequest())
     assert resp.campaign_status.value == "paused"
+
+
+def test_upsert_lead_row_uses_campaign_scoped_conflict():
+    runner, _, db = _make_runner()
+    table = _chainable_table()
+
+    def table_router(name: str) -> MagicMock:
+        if name == "linkedin_leads":
+            return table
+        return _chainable_table()
+
+    db.table.side_effect = table_router
+    row = {
+        "id": str(uuid.uuid4()),
+        "campaign_id": str(CAMPAIGN_ID),
+        "source_url": "https://linkedin.com/in/alice",
+        "icp_id": ICPId.SAAS_REVENUE.value,
+    }
+    runner._upsert_lead_row("linkedin_leads", row)
+    table.upsert.assert_called_once()
+    assert table.upsert.call_args.kwargs["on_conflict"] == "campaign_id,source_url"
+
+
+def test_upsert_lead_row_falls_back_to_source_url_conflict():
+    runner, _, db = _make_runner()
+    table = _chainable_table()
+
+    def upsert_effect(data, *, on_conflict):
+        if on_conflict == "campaign_id,source_url":
+            raise RuntimeError(
+                "there is no unique or exclusion constraint matching the ON CONFLICT specification"
+            )
+        return table
+
+    table.upsert.side_effect = upsert_effect
+
+    def table_router(name: str) -> MagicMock:
+        if name == "linkedin_leads":
+            return table
+        return _chainable_table()
+
+    db.table.side_effect = table_router
+
+    row = {
+        "id": str(uuid.uuid4()),
+        "campaign_id": str(CAMPAIGN_ID),
+        "source_url": "https://linkedin.com/in/bob",
+        "icp_id": ICPId.SAAS_REVENUE.value,
+    }
+    runner._upsert_lead_row("linkedin_leads", row)
+    assert table.upsert.call_count == 2
+    assert table.upsert.call_args.kwargs["on_conflict"] == "source_url"
